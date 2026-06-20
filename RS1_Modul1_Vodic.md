@@ -325,6 +325,33 @@ To znači: **sve na backend strani moraš ti napraviti od nule**, koristeći pos
    - U Solution Exploreru vidiš novi fajl u `Market.Domain/Entities/Dostavljaci/`
    - Enum ima tačno 3 vrijednosti sa brojevima 1, 2, 3
 
+**Primjer koda (ispravno) — `DostavljacTip.cs`:**
+
+```csharp
+namespace Market.Domain.Entities.Dostavljaci;
+
+/// <summary>
+/// Definiše tipove dostavljača.
+/// </summary>
+public enum DostavljacTip
+{
+    /// <summary>
+    /// Eksterni dostavljač.
+    /// </summary>
+    Ekstern = 1,
+
+    /// <summary>
+    /// Interni dostavljač.
+    /// </summary>
+    Intern = 2,
+
+    /// <summary>
+    /// Freelancer dostavljač.
+    /// </summary>
+    Freelancer = 3
+}
+```
+
 ---
 
 #### Korak 2: Entitet Dostavljač
@@ -395,6 +422,50 @@ To znači: **sve na backend strani moraš ti napraviti od nule**, koristeći pos
    - Ima `Constraints` sa `KodMaxLength = 3` (i `NazivMaxLength`)
    - Solution se **builda bez greške**
    - Još **nema** tabele u bazi — to dolazi u Koracima 3–5 (EF config, DbContext, migracija)
+
+**Primjer koda (ispravno) — `DostavljacEntity.cs`:**
+
+```csharp
+using Market.Domain.Common;
+
+namespace Market.Domain.Entities.Dostavljaci;
+
+/// <summary>
+/// Predstavlja dostavljača u sistemu.
+/// </summary>
+public class DostavljacEntity : BaseEntity
+{
+    /// <summary>
+    /// Naziv dostavljača.
+    /// </summary>
+    public required string Naziv { get; set; }
+
+    /// <summary>
+    /// Tip dostavljača (Ekstern / Intern / Freelancer).
+    /// </summary>
+    public required DostavljacTip Tip { get; set; }
+
+    /// <summary>
+    /// Kod dostavljača (max 3 karaktera, jedinstven).
+    /// </summary>
+    public required string Kod { get; set; }
+
+    /// <summary>
+    /// Da li je dostavljač aktivan.
+    /// </summary>
+    public bool Aktivan { get; set; }
+
+    /// <summary>
+    /// Single source of truth for technical/business constraints.
+    /// Used in validators and EF configuration.
+    /// </summary>
+    public static class Constraints
+    {
+        public const int NazivMaxLength = 100;
+        public const int KodMaxLength = 3;
+    }
+}
+```
 
 **Vizuelno — šta imaš nakon Koraka 1 i 2:**
 
