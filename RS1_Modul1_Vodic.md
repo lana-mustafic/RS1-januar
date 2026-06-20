@@ -757,11 +757,143 @@ FROM Dostavljaci;
 - U SQL Serveru možeš koristiti `EF.Functions.Like` ili `.ToLower()` na oba stringa
 - Pogledaj kako ProductCategories radi pretragu i prilagodi
 
+**Primjer koda (Dostavljači) — 3 fajla u `Modules/Catalog/Dostavljaci/Queries/List/`:**
+
+`ListDostavljaciQuery.cs`
+
+```csharp
+namespace Market.Application.Modules.Catalog.Dostavljaci.Queries.List;
+
+public sealed class ListDostavljaciQuery : BasePagedQuery<ListDostavljaciQueryDto>
+{
+    public string? Search { get; init; }
+}
+```
+
+`ListDostavljaciQueryDto.cs`
+
+```csharp
+namespace Market.Application.Modules.Catalog.Dostavljaci.Queries.List;
+
+public sealed class ListDostavljaciQueryDto
+{
+    public required int Id { get; init; }
+    public required string Naziv { get; init; }
+    public required string Kod { get; init; }
+    public required DostavljacTip Tip { get; init; }
+    public required bool Aktivan { get; init; }
+}
+```
+
+`ListDostavljaciQueryHandler.cs`
+
+```csharp
+namespace Market.Application.Modules.Catalog.Dostavljaci.Queries.List;
+
+public sealed class ListDostavljaciQueryHandler(IAppDbContext ctx)
+    : IRequestHandler<ListDostavljaciQuery, PageResult<ListDostavljaciQueryDto>>
+{
+    public async Task<PageResult<ListDostavljaciQueryDto>> Handle(ListDostavljaciQuery request, CancellationToken ct)
+    {
+        var q = ctx.Dostavljaci.AsNoTracking();
+
+        if (!string.IsNullOrWhiteSpace(request.Search))
+        {
+            var s = request.Search.Trim().ToLower();
+            q = q.Where(x => x.Naziv.ToLower().Contains(s));
+        }
+
+        var projectedQuery = q
+            .OrderBy(x => x.Naziv)
+            .Select(x => new ListDostavljaciQueryDto
+            {
+                Id = x.Id,
+                Naziv = x.Naziv,
+                Kod = x.Kod,
+                Tip = x.Tip,
+                Aktivan = x.Aktivan
+            });
+
+        return await PageResult<ListDostavljaciQueryDto>.FromQueryableAsync(projectedQuery, request.Paging, ct);
+    }
+}
+```
+
 #### Korak 7: CQRS — GetById (Query)
 
 - **Uzorak:** `ProductCategories/Queries/GetById/`
 - **Handler:** pronađi entitet po Id, ako ne postoji → baci `MarketNotFoundException`
 - **Vrati DTO** sa svim poljima potrebnim za edit formu
+
+**Primjer koda (Dostavljači) — 4 fajla u `Modules/Catalog/Dostavljaci/Queries/GetById/`:**
+
+`GetDostavljacByIdQuery.cs`
+
+```csharp
+namespace Market.Application.Modules.Catalog.Dostavljaci.Queries.GetById;
+
+public sealed class GetDostavljacByIdQuery : IRequest<GetDostavljacByIdQueryDto>
+{
+    public int Id { get; set; }
+}
+```
+
+`GetDostavljacByIdQueryDto.cs`
+
+```csharp
+namespace Market.Application.Modules.Catalog.Dostavljaci.Queries.GetById;
+
+public sealed class GetDostavljacByIdQueryDto
+{
+    public required int Id { get; init; }
+    public required string Naziv { get; init; }
+    public required string Kod { get; init; }
+    public required DostavljacTip Tip { get; init; }
+    public required bool Aktivan { get; init; }
+}
+```
+
+`GetDostavljacByIdQueryHandler.cs`
+
+```csharp
+namespace Market.Application.Modules.Catalog.Dostavljaci.Queries.GetById;
+
+public sealed class GetDostavljacByIdQueryHandler(IAppDbContext context)
+    : IRequestHandler<GetDostavljacByIdQuery, GetDostavljacByIdQueryDto>
+{
+    public async Task<GetDostavljacByIdQueryDto> Handle(GetDostavljacByIdQuery request, CancellationToken ct)
+    {
+        var dto = await context.Dostavljaci
+            .Where(x => x.Id == request.Id)
+            .Select(x => new GetDostavljacByIdQueryDto
+            {
+                Id = x.Id,
+                Naziv = x.Naziv,
+                Kod = x.Kod,
+                Tip = x.Tip,
+                Aktivan = x.Aktivan
+            })
+            .FirstOrDefaultAsync(ct);
+
+        if (dto is null)
+            throw new MarketNotFoundException($"Dostavljač (ID={request.Id}) nije pronađen.");
+
+        return dto;
+    }
+}
+```
+
+`GetDostavljacByIdQueryValidator.cs`
+
+```csharp
+public sealed class GetDostavljacByIdQueryValidator : AbstractValidator<GetDostavljacByIdQuery>
+{
+    public GetDostavljacByIdQueryValidator()
+    {
+        RuleFor(x => x.Id).GreaterThan(0).WithMessage("Id must be a positive value.");
+    }
+}
+```
 
 #### Korak 8: CQRS — Create (Command)
 
@@ -775,17 +907,217 @@ FROM Dostavljaci;
   5. Vrati novi Id
 - **Validator:** Naziv obavezan, Kod obavezan i max 3, Tip obavezan
 
+**Primjer koda (Dostavljači) — 3 fajla u `Modules/Catalog/Dostavljaci/Commands/Create/`:**
+
+`CreateDostavljacCommand.cs`
+
+```csharp
+namespace Market.Application.Modules.Catalog.Dostavljaci.Commands.Create;
+
+public sealed class CreateDostavljacCommand : IRequest<int>
+{
+    public required string Naziv { get; set; }
+    public required string Kod { get; set; }
+    public required DostavljacTip Tip { get; set; }
+    public bool Aktivan { get; set; } = true;
+}
+```
+
+`CreateDostavljacCommandHandler.cs`
+
+```csharp
+namespace Market.Application.Modules.Catalog.Dostavljaci.Commands.Create;
+
+public sealed class CreateDostavljacCommandHandler(IAppDbContext context)
+    : IRequestHandler<CreateDostavljacCommand, int>
+{
+    public async Task<int> Handle(CreateDostavljacCommand request, CancellationToken ct)
+    {
+        var naziv = request.Naziv?.Trim();
+        var kod = request.Kod?.Trim();
+
+        if (string.IsNullOrWhiteSpace(naziv))
+            throw new ValidationException("Naziv je obavezan.");
+
+        if (string.IsNullOrWhiteSpace(kod))
+            throw new ValidationException("Kod je obavezan.");
+
+        // Jedinstvenost koda (case-insensitive)
+        var exists = await context.Dostavljaci
+            .AnyAsync(x => x.Kod.ToLower() == kod.ToLower(), ct);
+
+        if (exists)
+            throw new MarketConflictException("Kod već postoji.");
+
+        var entity = new DostavljacEntity
+        {
+            Naziv = naziv,
+            Kod = kod,
+            Tip = request.Tip,
+            Aktivan = request.Aktivan
+        };
+
+        context.Dostavljaci.Add(entity);
+        await context.SaveChangesAsync(ct);
+
+        return entity.Id;
+    }
+}
+```
+
+`CreateDostavljacCommandValidator.cs`
+
+```csharp
+namespace Market.Application.Modules.Catalog.Dostavljaci.Commands.Create;
+
+public sealed class CreateDostavljacCommandValidator : AbstractValidator<CreateDostavljacCommand>
+{
+    public CreateDostavljacCommandValidator()
+    {
+        RuleFor(x => x.Naziv)
+            .NotEmpty().WithMessage("Naziv je obavezan.")
+            .MaximumLength(DostavljacEntity.Constraints.NazivMaxLength);
+
+        RuleFor(x => x.Kod)
+            .NotEmpty().WithMessage("Kod je obavezan.")
+            .MaximumLength(DostavljacEntity.Constraints.KodMaxLength);
+
+        RuleFor(x => x.Tip)
+            .IsInEnum().WithMessage("Tip nije validan.");
+    }
+}
+```
+
 #### Korak 9: CQRS — Update (Command)
 
 - **Uzorak:** `ProductCategories/Commands/Update/`
 - **Handler:** pronađi po Id, ažuriraj polja, provjeri jedinstvenost Koda (ali dozvoli isti kod za isti zapis)
 - **Controller:** Id iz URL-a prepisuje Id u command objektu
 
+**Primjer koda (Dostavljači) — 3 fajla u `Modules/Catalog/Dostavljaci/Commands/Update/`:**
+
+`UpdateDostavljacCommand.cs`
+
+```csharp
+namespace Market.Application.Modules.Catalog.Dostavljaci.Commands.Update;
+
+public sealed class UpdateDostavljacCommand : IRequest<Unit>
+{
+    [JsonIgnore]
+    public int Id { get; set; }
+
+    public required string Naziv { get; set; }
+    public required string Kod { get; set; }
+    public required DostavljacTip Tip { get; set; }
+    public required bool Aktivan { get; set; }
+}
+```
+
+`UpdateDostavljacCommandHandler.cs`
+
+```csharp
+namespace Market.Application.Modules.Catalog.Dostavljaci.Commands.Update;
+
+public sealed class UpdateDostavljacCommandHandler(IAppDbContext ctx)
+    : IRequestHandler<UpdateDostavljacCommand, Unit>
+{
+    public async Task<Unit> Handle(UpdateDostavljacCommand request, CancellationToken ct)
+    {
+        var entity = await ctx.Dostavljaci
+            .FirstOrDefaultAsync(x => x.Id == request.Id, ct);
+
+        if (entity is null)
+            throw new MarketNotFoundException($"Dostavljač (ID={request.Id}) nije pronađen.");
+
+        var kod = request.Kod.Trim();
+
+        // Jedinstvenost koda (case-insensitive), osim za isti ID
+        var exists = await ctx.Dostavljaci
+            .AnyAsync(x => x.Id != request.Id && x.Kod.ToLower() == kod.ToLower(), ct);
+
+        if (exists)
+            throw new MarketConflictException("Kod već postoji.");
+
+        entity.Naziv = request.Naziv.Trim();
+        entity.Kod = kod;
+        entity.Tip = request.Tip;
+        entity.Aktivan = request.Aktivan;
+
+        await ctx.SaveChangesAsync(ct);
+        return Unit.Value;
+    }
+}
+```
+
+`UpdateDostavljacCommandValidator.cs`
+
+```csharp
+namespace Market.Application.Modules.Catalog.Dostavljaci.Commands.Update;
+
+public sealed class UpdateDostavljacCommandValidator : AbstractValidator<UpdateDostavljacCommand>
+{
+    public UpdateDostavljacCommandValidator()
+    {
+        RuleFor(x => x.Id).GreaterThan(0);
+
+        RuleFor(x => x.Naziv)
+            .NotEmpty()
+            .MaximumLength(DostavljacEntity.Constraints.NazivMaxLength);
+
+        RuleFor(x => x.Kod)
+            .NotEmpty()
+            .MaximumLength(DostavljacEntity.Constraints.KodMaxLength);
+
+        RuleFor(x => x.Tip).IsInEnum();
+    }
+}
+```
+
 #### Korak 10: CQRS — Delete (Command)
 
 - **Uzorak:** `DeleteProductCategoryCommandHandler.cs`
 - **Handler:** pronađi entitet, pozovi `Remove()`, `SaveChangesAsync`
 - **Napomena:** Projekt koristi **soft delete** — `Remove()` u DbContext-u zapravo postavlja `IsDeleted = true` (vidi `DatabaseConfiguration.cs`)
+
+**Primjer koda (Dostavljači) — 2 fajla u `Modules/Catalog/Dostavljaci/Commands/Delete/`:**
+
+`DeleteDostavljacCommand.cs`
+
+```csharp
+namespace Market.Application.Modules.Catalog.Dostavljaci.Commands.Delete;
+
+public sealed class DeleteDostavljacCommand : IRequest<Unit>
+{
+    public required int Id { get; set; }
+}
+```
+
+`DeleteDostavljacCommandHandler.cs`
+
+```csharp
+namespace Market.Application.Modules.Catalog.Dostavljaci.Commands.Delete;
+
+public sealed class DeleteDostavljacCommandHandler(IAppDbContext context, IAppCurrentUser appCurrentUser)
+    : IRequestHandler<DeleteDostavljacCommand, Unit>
+{
+    public async Task<Unit> Handle(DeleteDostavljacCommand request, CancellationToken ct)
+    {
+        if (appCurrentUser.UserId is null)
+            throw new MarketBusinessRuleException("123", "Korisnik nije autentifikovan.");
+
+        var entity = await context.Dostavljaci
+            .FirstOrDefaultAsync(x => x.Id == request.Id, ct);
+
+        if (entity is null)
+            throw new MarketNotFoundException("Dostavljač nije pronađen.");
+
+        context.Dostavljaci.Remove(entity); // soft delete u ovom projektu
+        await context.SaveChangesAsync(ct);
+
+        return Unit.Value;
+    }
+}
+```
 
 #### Korak 11: Controller
 
