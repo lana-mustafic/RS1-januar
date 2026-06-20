@@ -286,6 +286,47 @@ To znači: **sve na backend strani moraš ti napraviti od nule**, koristeći pos
 - **Razmisli:** Tvoj enum treba tri vrijednosti: Ekstern, Intern, Freelancer
 - **Zašto:** Zadatak kaže „enum, ne treba kreirati entitet" — enum se čuva kao broj u bazi
 
+**Detaljno — šta tačno uraditi:**
+
+1. **Gdje kreirati fajl**
+   - U Visual Studiju, u projektu `Market.Domain`, otvori folder `Entities/`
+   - Napravi **novi folder** npr. `Dostavljaci/` (može i `Catalog/`, ali `Dostavljaci/` je jasnije)
+   - U tom folderu kreiraj novi C# fajl, npr. `DostavljacTip.cs`
+
+2. **Šta kopiraš kao obrazac (NE kopiraj sadržaj 1:1)**
+   - Otvori `FakturaTip.cs` — vidi strukturu:
+     - `namespace Market.Domain.Entities.Fakture;`
+     - XML komentar iznad enuma (`/// <summary>...`)
+     - `public enum ImeEnuma { ... }`
+     - Svaka vrijednost ima **eksplicitni broj**: `Ulazna = 1`, `Izlazna = 2`
+   - Možeš pogledati i `OrderStatusType.cs` — isti princip, samo više vrijednosti
+
+3. **Šta ti pišeš u fajlu (logika, ne gotov kod)**
+   - `namespace` → `Market.Domain.Entities.Dostavljaci` (ili folder koji si odabrala)
+   - Ime enuma → npr. `DostavljacTip` (ili `TipDostavljaca` — bitno da bude jasno i konzistentno kroz cijeli projekt)
+   - Tri člana enuma, **svaki sa brojem od 1 nadalje**:
+     - `Ekstern = 1`
+     - `Intern = 2`
+     - `Freelancer = 3`
+   - Opcionalno: kratki `/// <summary>` komentar iznad enuma i iznad svake vrijednosti (kao u uzorku)
+
+4. **Zašto brojevi (= 1, = 2, = 3)?**
+   - U bazi se enum **ne čuva kao tekst** „Ekstern", nego kao **cijeli broj** u koloni (npr. `1`, `2`, `3`)
+   - Eksplicitni brojevi su konvencija u ovom projektu — vidi `FakturaTip`, `OrderStatusType`
+   - **Ne kreiraj** poseban entitet `TipDostavljacaEntity` i **ne kreiraj** posebnu tabelu `TipoviDostavljaca` — to bi bilo pogrešno
+
+5. **Šta NE radiš u ovom koraku**
+   - Ne diraš DbContext, migraciju, handler, controller
+   - Ne praviš frontend enum još — to dolazi kasnije
+   - Enum je samo **tip podatka** koji ćeš koristiti u entitetu u Koraku 2
+
+6. **Provjera da je korak gotov**
+   - Solution se **builda bez greške** (Ctrl+Shift+B)
+   - U Solution Exploreru vidiš novi fajl u `Market.Domain/Entities/Dostavljaci/`
+   - Enum ima tačno 3 vrijednosti sa brojevima 1, 2, 3
+
+---
+
 #### Korak 2: Entitet Dostavljač
 
 - **Otvori:** `ProductCategoryEntity.cs` i `BaseEntity.cs`
@@ -293,6 +334,79 @@ To znači: **sve na backend strani moraš ti napraviti od nule**, koristeći pos
 - **Dodaj svojstva:** Naziv, Tip (enum), Kod, Aktivan
 - **Razmisli:** U entitetu možeš imati `Constraints` klasu sa konstantama (npr. max dužina koda = 3) — isto kao kod ProductCategory
 - **Zašto:** Konstante koristiš i u validatoru i u EF konfiguraciji — jedan izvor istine
+
+**Detaljno — šta tačno uraditi:**
+
+1. **Gdje kreirati fajl**
+   - U **istom folderu** gdje si napravila enum: `Market.Domain/Entities/Dostavljaci/`
+   - Novi fajl, npr. `DostavljacEntity.cs`
+   - Konvencija u projektu: entiteti se zovu `*Entity` (vidi `ProductCategoryEntity`, `FakturaEntity`)
+
+2. **Šta nasljeđuješ — otvori `BaseEntity.cs`**
+   - `BaseEntity` već daje ova polja — **NE pišeš ih ponovo** u svom entitetu:
+     - `int Id` — primarni ključ
+     - `bool IsDeleted` — soft delete (koristi se kasnije pri brisanju)
+     - `DateTime CreatedAtUtc` — automatski se puni pri kreiranju
+     - `DateTime? ModifiedAtUtc` — automatski pri izmjeni
+   - Tvoja klasa: `public class DostavljacEntity : BaseEntity`
+
+3. **Koja svojstva TI dodaješ (iz zadatka)**
+
+   | Svojstvo u entitetu | C# tip | Napomena |
+   |---------------------|--------|----------|
+   | `Naziv` | `string` | Obavezno polje |
+   | `Tip` | tvoj enum (`DostavljacTip`) | Vidi kako `FakturaEntity` ima `public FakturaTip Tip` |
+   | `Kod` | `string` | Obavezno, max 3 karaktera, jedinstven (jedinstvenost ide u EF config + handler kasnije) |
+   | `Aktivan` | `bool` | Default `true` — postavljaš u **Create handleru**, ne mora u samom entitetu |
+
+4. **Kako izgleda property u praksi (uzorci iz projekta)**
+   - Otvori `ProductCategoryEntity.cs` → vidi `Name`, `IsEnabled` — običan `get; set;`
+   - Otvori `FakturaEntity.cs` → vidi `Tip` — enum property; `BrojRacuna` koristi `required string` jer je obavezno
+   - Za Dostavljača možeš koristiti `required` na obaveznim stringovima (`Naziv`, `Kod`) i na `Tip` — kao u `FakturaEntity`
+   - `Aktivan` je običan `bool` — vrijednost `true` postaviš kad kreiraš zapis u handleru (Korak 8)
+
+5. **`Constraints` klasa — jedan izvor istine**
+   - Otvori `ProductCategoryEntity.cs` → na dnu klase vidi:
+     ```
+     public static class Constraints
+     {
+         public const int NameMaxLength = 100;
+     }
+     ```
+   - U tvom entitetu napravi isto, npr.:
+     - `KodMaxLength = 3` — **iz zadatka** (max 3 slova)
+     - `NazivMaxLength = 100` — zadatak ne kaže eksplicitno, ali projekat uvijek stavlja max dužinu; uzmi 100 kao kod kategorija (ili 150 kao kod proizvoda)
+   - Ove konstante **kasnije** koristiš u:
+     - EF konfiguraciji (`HasMaxLength(DostavljacEntity.Constraints.KodMaxLength)`)
+     - Validatoru (`MaximumLength(DostavljacEntity.Constraints.KodMaxLength)`)
+
+6. **Šta NE dodaješ u entitet**
+   - **Navigation property** — nema povezane tabele za Tip (to je enum, ne FK)
+   - **Include** ti ne treba za Dostavljača
+   - Ne pišeš logiku (validacija, jedinstvenost koda) u entitetu — to ide u validator i handler
+
+7. **Using direktive na vrhu fajla**
+   - `using Market.Domain.Common;` — zbog `BaseEntity`
+   - Enum je u istom namespaceu/folderu — obično ne treba dodatni using
+
+8. **Provjera da je korak gotov**
+   - `DostavljacEntity` nasljeđuje `BaseEntity`
+   - Ima 4 svojstva: `Naziv`, `Tip`, `Kod`, `Aktivan`
+   - Ima `Constraints` sa `KodMaxLength = 3` (i `NazivMaxLength`)
+   - Solution se **builda bez greške**
+   - Još **nema** tabele u bazi — to dolazi u Koracima 3–5 (EF config, DbContext, migracija)
+
+**Vizuelno — šta imaš nakon Koraka 1 i 2:**
+
+```
+Market.Domain/
+└── Entities/
+    └── Dostavljaci/
+        ├── DostavljacTip.cs      ← enum (Ekstern=1, Intern=2, Freelancer=3)
+        └── DostavljacEntity.cs   ← entitet (Naziv, Tip, Kod, Aktivan + Constraints)
+```
+
+**Sljedeći korak:** Tek kad ovo builda, prelaziš na Korak 3 (EF konfiguracija) — bez nje baza ne zna max dužinu koda ni unique index.
 
 #### Korak 3: EF konfiguracija
 
