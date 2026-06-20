@@ -559,6 +559,69 @@ Market.Infrastructure/
      - `DbSet<DostavljacEntity> Dostavljaci { get; }`
    - Dodaj isti `using` za entitet
 
+**Primjer koda — ispravan `DatabaseContext.cs` isječak:**
+
+```csharp
+using Market.Application.Abstractions;
+using Market.Domain.Entities.Dostavljaci;
+using Market.Domain.Entities.Fakture;
+using Market.Domain.Entities.Sales;
+
+namespace Market.Infrastructure.Database;
+
+public partial class DatabaseContext : DbContext, IAppDbContext
+{
+    public DbSet<ProductCategoryEntity> ProductCategories => Set<ProductCategoryEntity>();
+    public DbSet<ProductEntity> Products => Set<ProductEntity>();
+    public DbSet<PromotionEntity> Promotions => Set<PromotionEntity>();
+    public DbSet<MarketUserEntity> Users => Set<MarketUserEntity>();
+    public DbSet<RefreshTokenEntity> RefreshTokens => Set<RefreshTokenEntity>();
+
+    public DbSet<OrderEntity> Orders => Set<OrderEntity>();
+    public DbSet<OrderItemEntity> OrderItems => Set<OrderItemEntity>();
+
+    public DbSet<FakturaEntity> Fakture => Set<FakturaEntity>();
+
+    // NOVO — za Dostavljača:
+    public DbSet<DostavljacEntity> Dostavljaci => Set<DostavljacEntity>();
+
+    private readonly TimeProvider _clock;
+    public DatabaseContext(DbContextOptions<DatabaseContext> options, TimeProvider clock) : base(options)
+    {
+        _clock = clock;
+    }
+}
+```
+
+**Primjer koda — ispravan `IAppDbContext.cs` isječak:**
+
+```csharp
+using Market.Domain.Entities.Dostavljaci;
+using Market.Domain.Entities.Fakture;
+using Market.Domain.Entities.Sales;
+
+namespace Market.Application.Abstractions;
+
+public interface IAppDbContext
+{
+    DbSet<ProductEntity> Products { get; }
+    DbSet<ProductCategoryEntity> ProductCategories { get; }
+    DbSet<PromotionEntity> Promotions { get; }
+    DbSet<MarketUserEntity> Users { get; }
+    DbSet<RefreshTokenEntity> RefreshTokens { get; }
+
+    DbSet<OrderEntity> Orders { get; }
+    DbSet<OrderItemEntity> OrderItems { get; }
+
+    DbSet<FakturaEntity> Fakture { get; }
+
+    // NOVO — za Dostavljača:
+    DbSet<DostavljacEntity> Dostavljaci { get; }
+
+    Task<int> SaveChangesAsync(CancellationToken ct);
+}
+```
+
 4. **Pravilo konzistentnosti imena**
 
    | Mjesto | Ime koje koristiš | Primjer pristupa u handleru |
