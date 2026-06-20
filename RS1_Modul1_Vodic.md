@@ -2515,6 +2515,242 @@ model = response (Korak 7: patchValue u formu)
 - **Dugme Sačuvaj:** `[disabled]="form.invalid || isSaving"`
 - **onSubmit:** pozovi API create, toast success, navigiraj nazad na listu
 
+**Detaljno — šta tačno uraditi:**
+
+1. **Gdje pišeš kod**
+   - `src/app/modules/admin/catalogs/dostavljaci/dostavljac-add/dostavljac-add.component.ts`
+   - `src/app/modules/admin/catalogs/dostavljaci/dostavljac-add/dostavljac-add.component.html`
+
+2. **Uzorak — otvori `products-add.component.ts`**
+   - Nasljeđuje `BaseFormComponent<TModel>`
+   - `ngOnInit` → `this.initForm(false)` — **false** = add mode
+   - `loadData()` — prazno u add modu (abstract metoda, mora postojati)
+   - `save()` — poziva `api.create(...)`, toast, navigacija
+   - HTML: `[formGroup]="form"` + `(ngSubmit)="onSubmit()"`
+
+3. **`BaseFormComponent` — šta dobijaš besplatno**
+   - `form: FormGroup`
+   - `onSubmit()` — već radi `markAllAsTouched()` + poziva tvoj `save()`
+   - `hasError(controlName)` — za prikaz grešaka u HTML-u
+   - **Napomena:** U projektu se koristi `isLoading` (ne `isSaving`) za disabled dugme
+
+4. **FormGroup — polja i validatori**
+
+   | Control | Validators | Default |
+   |---------|------------|---------|
+   | `naziv` | `Validators.required` | `''` |
+   | `tip` | `Validators.required` | `null` |
+   | `kod` | `Validators.required`, `Validators.maxLength(3)` | `''` |
+   | `aktivan` | — | `true` |
+
+5. **`save()` — logika**
+   - Provjeri `form.invalid` → return
+   - `startLoading()`
+   - Napravi `CreateDostavljacCommand` iz `form.value`
+   - `api.create(command).subscribe(...)`
+   - Success: `toaster.success(...)`, `router.navigate(['/admin/dostavljaci'])`
+   - Error: `toaster.error(...)`, `stopLoading()`
+
+6. **HTML — Reactive Forms binding**
+   - `<form [formGroup]="form" (ngSubmit)="onSubmit()">`
+   - Svako polje: `formControlName="naziv"` (i tip, kod, aktivan)
+   - Tip: `mat-select` sa opcijama enuma (Ekstern, Intern, Freelancer)
+   - Aktivan: `mat-checkbox` ili `mat-slide-toggle`
+   - Dugme: `[disabled]="form.invalid || isLoading"`
+
+7. **Provjera da je korak gotov**
+   - Forma se prikaže na `/admin/dostavljaci/add`
+   - Prazna forma → dugme Sačuvaj disabled
+   - Bez naziva/koda/tipa → validacija crvena
+   - Kod duži od 3 → greška
+   - Uspješan submit → toast + nazad na listu + novi zapis vidljiv
+
+**Primjer koda — `dostavljac-add.component.ts`:**
+
+```typescript
+import { Component, inject, OnInit } from '@angular/core';
+import { FormBuilder, FormGroup, Validators } from '@angular/forms';
+import { Router } from '@angular/router';
+import { BaseFormComponent } from '../../../../core/components/base-classes/base-form-component';
+import { DostavljaciApiService } from '../../../../api-services/dostavljaci/dostavljaci-api.service';
+import {
+  CreateDostavljacCommand,
+  DostavljacTip,
+  GetDostavljacByIdQueryDto,
+} from '../../../../api-services/dostavljaci/dostavljaci-api.model';
+import { ToasterService } from '../../../../core/services/toaster.service';
+
+@Component({
+  selector: 'app-dostavljac-add',
+  standalone: false,
+  templateUrl: './dostavljac-add.component.html',
+  styleUrl: './dostavljac-add.component.scss',
+})
+export class DostavljacAddComponent
+  extends BaseFormComponent<GetDostavljacByIdQueryDto>
+  implements OnInit
+{
+  private api = inject(DostavljaciApiService);
+  private router = inject(Router);
+  private toaster = inject(ToasterService);
+  private fb = inject(FormBuilder);
+
+  DostavljacTip = DostavljacTip;
+  tipOptions = [
+    { value: DostavljacTip.Ekstern, label: 'Ekstern' },
+    { value: DostavljacTip.Intern, label: 'Intern' },
+    { value: DostavljacTip.Freelancer, label: 'Freelancer' },
+  ];
+
+  ngOnInit(): void {
+    this.initForm(false); // Add mode
+    this.form = this.fb.group({
+      naziv: ['', [Validators.required]],
+      tip: [null, [Validators.required]],
+      kod: ['', [Validators.required, Validators.maxLength(3)]],
+      aktivan: [true],
+    });
+  }
+
+  protected loadData(): void {
+    // Nije potrebno u add modu
+  }
+
+  protected save(): void {
+    if (this.form.invalid || this.isLoading) {
+      return;
+    }
+
+    this.startLoading();
+
+    const command: CreateDostavljacCommand = {
+      naziv: this.form.value.naziv?.trim(),
+      kod: this.form.value.kod?.trim(),
+      tip: this.form.value.tip,
+      aktivan: this.form.value.aktivan ?? true,
+    };
+
+    this.api.create(command).subscribe({
+      next: () => {
+        this.stopLoading();
+        this.toaster.success('Dostavljač uspješno dodan.');
+        this.router.navigate(['/admin/dostavljaci']);
+      },
+      error: (err) => {
+        this.stopLoading(err?.message ?? 'Greška pri dodavanju.');
+        this.toaster.error(err?.message ?? 'Greška pri dodavanju.');
+        console.error('Create dostavljac error:', err);
+      },
+    });
+  }
+
+  onCancel(): void {
+    this.router.navigate(['/admin/dostavljaci']);
+  }
+
+  getErrorMessage(controlName: string): string {
+    const control = this.form.get(controlName);
+    if (!control || !control.errors) return '';
+
+    if (control.errors['required']) return 'Polje je obavezno.';
+    if (control.errors['maxlength']) return 'Kod može imati najviše 3 karaktera.';
+    return 'Neispravna vrijednost.';
+  }
+}
+```
+
+**Primjer koda — `dostavljac-add.component.html`:**
+
+```html
+<div class="container">
+  <div class="header-card">
+    <h1>Novi dostavljač</h1>
+  </div>
+
+  <div class="form-card">
+    <form [formGroup]="form" (ngSubmit)="onSubmit()">
+      <div *ngIf="errorMessage" class="error-banner">
+        <mat-icon>error</mat-icon>
+        <span>{{ errorMessage }}</span>
+      </div>
+
+      <div *ngIf="isLoading" class="loading-overlay">
+        <mat-spinner diameter="50"></mat-spinner>
+        <p>Spremanje...</p>
+      </div>
+
+      <!-- Naziv -->
+      <mat-form-field appearance="outline" class="full-width">
+        <mat-label>Naziv</mat-label>
+        <input matInput formControlName="naziv" placeholder="Unesite naziv" />
+        <mat-error *ngIf="hasError('naziv')">{{ getErrorMessage('naziv') }}</mat-error>
+      </mat-form-field>
+
+      <!-- Kod -->
+      <mat-form-field appearance="outline" class="full-width">
+        <mat-label>Kod</mat-label>
+        <input matInput formControlName="kod" placeholder="Max 3 karaktera" maxlength="3" />
+        <mat-error *ngIf="hasError('kod')">{{ getErrorMessage('kod') }}</mat-error>
+      </mat-form-field>
+
+      <!-- Tip (enum) -->
+      <mat-form-field appearance="outline" class="full-width">
+        <mat-label>Tip dostavljača</mat-label>
+        <mat-select formControlName="tip">
+          <mat-option *ngFor="let opt of tipOptions" [value]="opt.value">
+            {{ opt.label }}
+          </mat-option>
+        </mat-select>
+        <mat-error *ngIf="hasError('tip')">{{ getErrorMessage('tip') }}</mat-error>
+      </mat-form-field>
+
+      <!-- Aktivan -->
+      <mat-checkbox formControlName="aktivan">Aktivan</mat-checkbox>
+
+      <!-- Akcije -->
+      <div class="form-actions">
+        <button type="button" mat-stroked-button (click)="onCancel()" [disabled]="isLoading">
+          <mat-icon>close</mat-icon>
+          Odustani
+        </button>
+
+        <button
+          type="submit"
+          mat-raised-button
+          color="primary"
+          [disabled]="form.invalid || isLoading"
+        >
+          <mat-icon>save</mat-icon>
+          Sačuvaj
+        </button>
+      </div>
+    </form>
+  </div>
+</div>
+```
+
+**Vizuelni tok — dodavanje:**
+
+```
+/admin/dostavljaci/add
+   ↓
+ngOnInit → initForm(false) → prazna forma (aktivan=true)
+   ↓
+Korisnik popuni polja
+   ↓
+Klik "Sačuvaj" → onSubmit() → save()
+   ↓
+api.create(command) → POST /Dostavljaci
+   ↓
+toast success → router.navigate(['/admin/dostavljaci'])
+   ↓
+Lista se učita → novi zapis vidljiv
+```
+
+**Sljedeći korak:** Korak 7 — ista forma za **edit** (`dostavljac-edit`), ali `initForm(true)` + `getById` + `update`.
+
+---
+
 #### Korak 7: Reactive Form — izmjena
 
 - Ista forma kao Add, ali:
