@@ -1434,7 +1434,224 @@ Vraća se Id novog zapisa → Controller vraća 201 Created
 - **Servis treba metode:** `list()`, `getById()`, `create()`, `update()`, `delete()`
 - **Zašto:** Komponente ne zovu HTTP direktno — sve ide preko servisa (čist kod, lakše održavanje)
 
-#### Korak 2: Komponenta liste — TypeScript
+**Detaljno — šta tačno uraditi:**
+
+1. **Gdje kreirati fajlove**
+   - U VS Code-u otvori frontend projekat: `rs1-frontend-2025-26/`
+   - Napravi folder: `src/app/api-services/dostavljaci/`
+   - U njemu dva fajla:
+     - `dostavljaci-api.model.ts`
+     - `dostavljaci-api.service.ts`
+
+2. **Uzorak koji kopiraš obrazac (NE kopiraj 1:1)**
+   - Otvori `product-categories-api.model.ts` — vidi strukturu:
+     - `List...Request extends BasePagedQuery` (paging + search)
+     - `List...QueryDto` (jedan red u tabeli)
+     - `Get...ByIdQueryDto` (podaci za edit formu)
+     - `List...Response = PageResult<...>`
+     - `Create...Command`, `Update...Command`
+   - Otvori `product-categories-api.service.ts` — vidi:
+     - `baseUrl = environment.apiUrl + '/ProductCategories'`
+     - metode: `list`, `getById`, `create`, `update`, `delete`
+     - `buildHttpParams(request)` za query string
+
+3. **Mapiranje backend → frontend (bitno!)**
+
+   | Backend (C#) | Frontend (TS) | JSON u HTTP |
+   |--------------|---------------|-------------|
+   | `ListDostavljaciQuery` | `ListDostavljaciRequest` | query string |
+   | `ListDostavljaciQueryDto` | `ListDostavljaciQueryDto` | camelCase: `id`, `naziv`, `kod`, `tip`, `aktivan` |
+   | `GetDostavljacByIdQueryDto` | `GetDostavljacByIdQueryDto` | isto |
+   | `CreateDostavljacCommand` | `CreateDostavljacCommand` | body POST |
+   | `UpdateDostavljacCommand` | `UpdateDostavljacCommand` | body PUT |
+   | `DostavljacTip` enum | `DostavljacTip` enum | broj: 1, 2, 3 |
+
+4. **Enum na frontendu**
+   - Backend šalje `tip` kao **broj** (1, 2, 3)
+   - Na frontendu definiši enum sa istim brojevima:
+     - `Ekstern = 1`, `Intern = 2`, `Freelancer = 3`
+   - Koristiš ga u modelima i u `mat-select` (Korak 8)
+
+5. **Servis — pravila**
+   - `@Injectable({ providedIn: 'root' })` — servis dostupan cijeloj app
+   - `baseUrl = \`${environment.apiUrl}/Dostavljaci\`` — **mora** odgovarati controlleru
+   - `list(request)` koristi `buildHttpParams` — automatski šalje `paging.page`, `paging.pageSize`, `search`
+   - `create` vraća `Observable<number>` (novi Id)
+   - `update` i `delete` vraćaju `Observable<void>`
+
+6. **Šta NE radiš u ovom koraku**
+   - Ne diraš komponente (`dostavljaci.component.ts`)
+   - Ne diraš routing
+   - Ne pišeš HTML
+   - Servis se **ne registruje** u modulu — `providedIn: 'root'` je dovoljno
+
+7. **Provjera da je korak gotov**
+   - Folder `api-services/dostavljaci/` postoji sa 2 fajla
+   - Model ima sve tipove (list request, list dto, getById dto, create/update command, enum)
+   - Servis ima 5 metoda: `list`, `getById`, `create`, `update`, `delete`
+   - Frontend se builda bez greške (`npm start` ili `ng build`)
+   - U Network tabu (kasnije) vidiš pozive na `/Dostavljaci`
+
+**Primjer koda (ispravno) — `dostavljaci-api.model.ts`:**
+
+```typescript
+import { BasePagedQuery } from '../../core/models/paging/base-paged-query';
+import { PageResult } from '../../core/models/paging/page-result';
+
+// === ENUM (odgovara DostavljacTip.cs na backendu) ===
+
+export enum DostavljacTip {
+  Ekstern = 1,
+  Intern = 2,
+  Freelancer = 3,
+}
+
+// === QUERIES (READ) ===
+
+/**
+ * Query parameters for GET /Dostavljaci
+ * Corresponds to: ListDostavljaciQuery.cs
+ */
+export class ListDostavljaciRequest extends BasePagedQuery {
+  search?: string | null;
+}
+
+/**
+ * Response item for GET /Dostavljaci
+ * Corresponds to: ListDostavljaciQueryDto.cs
+ */
+export interface ListDostavljaciQueryDto {
+  id: number;
+  naziv: string;
+  kod: string;
+  tip: DostavljacTip;
+  aktivan: boolean;
+}
+
+/**
+ * Response for GET /Dostavljaci/{id}
+ * Corresponds to: GetDostavljacByIdQueryDto.cs
+ */
+export interface GetDostavljacByIdQueryDto {
+  id: number;
+  naziv: string;
+  kod: string;
+  tip: DostavljacTip;
+  aktivan: boolean;
+}
+
+/**
+ * Paged response for GET /Dostavljaci
+ */
+export type ListDostavljaciResponse = PageResult<ListDostavljaciQueryDto>;
+
+// === COMMANDS (WRITE) ===
+
+/**
+ * Command for POST /Dostavljaci
+ * Corresponds to: CreateDostavljacCommand.cs
+ */
+export interface CreateDostavljacCommand {
+  naziv: string;
+  kod: string;
+  tip: DostavljacTip;
+  aktivan: boolean;
+}
+
+/**
+ * Command for PUT /Dostavljaci/{id}
+ * Corresponds to: UpdateDostavljacCommand.cs
+ */
+export interface UpdateDostavljacCommand {
+  naziv: string;
+  kod: string;
+  tip: DostavljacTip;
+  aktivan: boolean;
+}
+```
+
+**Primjer koda (ispravno) — `dostavljaci-api.service.ts`:**
+
+```typescript
+import { inject, Injectable } from '@angular/core';
+import { HttpClient } from '@angular/common/http';
+import { Observable } from 'rxjs';
+import { environment } from '../../../environments/environment';
+import {
+  ListDostavljaciRequest,
+  ListDostavljaciResponse,
+  GetDostavljacByIdQueryDto,
+  CreateDostavljacCommand,
+  UpdateDostavljacCommand,
+} from './dostavljaci-api.model';
+import { buildHttpParams } from '../../core/models/build-http-params';
+
+@Injectable({
+  providedIn: 'root',
+})
+export class DostavljaciApiService {
+  private readonly baseUrl = `${environment.apiUrl}/Dostavljaci`;
+  private http = inject(HttpClient);
+
+  /**
+   * GET /Dostavljaci
+   * List dostavljaci with optional query parameters (paging + search).
+   */
+  list(request?: ListDostavljaciRequest): Observable<ListDostavljaciResponse> {
+    const params = request ? buildHttpParams(request as any) : undefined;
+
+    return this.http.get<ListDostavljaciResponse>(this.baseUrl, {
+      params,
+    });
+  }
+
+  /**
+   * GET /Dostavljaci/{id}
+   * Get a single dostavljac by ID.
+   */
+  getById(id: number): Observable<GetDostavljacByIdQueryDto> {
+    return this.http.get<GetDostavljacByIdQueryDto>(`${this.baseUrl}/${id}`);
+  }
+
+  /**
+   * POST /Dostavljaci
+   * Create a new dostavljac.
+   * @returns ID of the newly created record
+   */
+  create(payload: CreateDostavljacCommand): Observable<number> {
+    return this.http.post<number>(this.baseUrl, payload);
+  }
+
+  /**
+   * PUT /Dostavljaci/{id}
+   * Update an existing dostavljac.
+   */
+  update(id: number, payload: UpdateDostavljacCommand): Observable<void> {
+    return this.http.put<void>(`${this.baseUrl}/${id}`, payload);
+  }
+
+  /**
+   * DELETE /Dostavljaci/{id}
+   * Delete a dostavljac.
+   */
+  delete(id: number): Observable<void> {
+    return this.http.delete<void>(`${this.baseUrl}/${id}`);
+  }
+}
+```
+
+**Vizuelno — šta dodaješ u Koraku 1:**
+
+```
+src/app/api-services/
+└── dostavljaci/
+    ├── dostavljaci-api.model.ts    ← tipovi + enum
+    └── dostavljaci-api.service.ts  ← HTTP pozivi ka backendu
+```
+
+**Sljedeći korak:** Korak 2 — komponenta liste (`dostavljaci.component.ts`) koristi `DostavljaciApiService.list()` i nasljeđuje `BaseListPagedComponent`.
+
+---
 
 - **Otvori:** `product-categories-2.component.ts` i `products.component.ts`
 - **Naslijedi:** `BaseListPagedComponent<TItem, TRequest>`
