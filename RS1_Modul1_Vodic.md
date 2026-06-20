@@ -3483,6 +3483,176 @@ inputKeyDown(event: KeyboardEvent): void {
 - [ ] Toast na success i error
 - [ ] Navigacija nazad na listu
 
+**Detaljno — šta tačno uraditi (backend + frontend):**
+
+1. **Tok dodavanja (cijela slika)**
+   ```
+   Klik "Novi dostavljač" → /admin/dostavljaci/add
+        ↓
+   Forma (aktivan=true, ostalo prazno) → Sačuvaj disabled
+        ↓
+   Korisnik popuni polja → Sačuvaj enabled
+        ↓
+   onSubmit() → save() → POST /Dostavljaci
+        ↓
+   Backend: Validator → Handler (jedinstven kod) → SaveChanges
+        ↓
+   201 Created → toast success → navigate na listu
+   ```
+
+2. **Backend — tri sloja validacije**
+
+   | Sloj | Gdje | Šta provjerava |
+   |------|------|----------------|
+   | **Validator** (FluentValidation) | `CreateDostavljacCommandValidator` | Prazan naziv, kod > 3, tip nije validan enum |
+   | **Handler** (poslovna logika) | `CreateDostavljacCommandHandler` | Jedinstvenost koda, trim naziva/koda |
+   | **Baza** (EF config) | `DostavljacConfiguration` | Max dužina, unique index na Kod |
+
+3. **Backend — `CreateDostavljacCommandValidator.cs`**
+
+```csharp
+public sealed class CreateDostavljacCommandValidator : AbstractValidator<CreateDostavljacCommand>
+{
+    public CreateDostavljacCommandValidator()
+    {
+        RuleFor(x => x.Naziv)
+            .NotEmpty().WithMessage("Naziv je obavezan.")
+            .MaximumLength(DostavljacEntity.Constraints.NazivMaxLength);
+
+        RuleFor(x => x.Kod)
+            .NotEmpty().WithMessage("Kod je obavezan.")
+            .MaximumLength(DostavljacEntity.Constraints.KodMaxLength); // = 3
+
+        RuleFor(x => x.Tip)
+            .IsInEnum().WithMessage("Tip nije validan.");
+    }
+}
+```
+
+   - Automatski se pokreće preko `ValidationBehavior` — ne zoveš ručno
+   - Ako padne → **400 Bad Request** sa porukom
+
+4. **Backend — `CreateDostavljacCommandHandler.cs` (jedinstvenost koda)**
+
+```csharp
+var kod = request.Kod?.Trim();
+
+var exists = await context.Dostavljaci
+    .AnyAsync(x => x.Kod.ToLower() == kod.ToLower(), ct);
+
+if (exists)
+    throw new MarketConflictException("Kod već postoji.");
+
+var entity = new DostavljacEntity
+{
+    Naziv = naziv,
+    Kod = kod,
+    Tip = request.Tip,
+    Aktivan = request.Aktivan  // default true iz commanda
+};
+```
+
+   - **Jedinstvenost** ide u handler (ne u validator) — validator ne zna bazu
+   - **Case-insensitive:** `ABC` i `abc` su isti kod
+
+5. **Backend — Controller**
+
+```csharp
+[HttpPost]
+public async Task<ActionResult<int>> Create(CreateDostavljacCommand command, CancellationToken ct)
+{
+    int id = await sender.Send(command, ct);
+    return CreatedAtAction(nameof(GetById), new { id }, new { id });
+}
+```
+
+6. **Frontend — FormGroup sa validatorima**
+
+```typescript
+this.form = this.fb.group({
+  naziv: ['', [Validators.required]],
+  tip: [null, [Validators.required]],
+  kod: ['', [Validators.required, Validators.maxLength(3)]],
+  aktivan: [true],  // default true
+});
+```
+
+7. **Frontend — `save()` i navigacija**
+
+```typescript
+protected save(): void {
+  if (this.form.invalid || this.isLoading) return;
+
+  const command: CreateDostavljacCommand = {
+    naziv: this.form.value.naziv?.trim(),
+    kod: this.form.value.kod?.trim(),
+    tip: this.form.value.tip,
+    aktivan: this.form.value.aktivan ?? true,
+  };
+
+  this.api.create(command).subscribe({
+    next: () => {
+      this.toaster.success('Dostavljač uspješno dodan.');
+      this.router.navigate(['/admin/dostavljaci']);
+    },
+    error: (err) => {
+      this.toaster.error(err?.message ?? 'Greška pri dodavanju.');
+    },
+  });
+}
+```
+
+8. **Frontend — HTML dugme**
+
+```html
+<button type="submit" mat-raised-button color="primary"
+        [disabled]="form.invalid || isLoading">
+  Sačuvaj
+</button>
+```
+
+   - Dok forma nije validna → dugme **disabled** (zahtjev ispita)
+   - `onSubmit()` poziva `markAllAsTouched()` → prikaže crvene greške
+
+9. **Mapiranje zahtjeva → implementacija**
+
+   | Zahtjev | Backend | Frontend |
+   |---------|---------|----------|
+   | Naziv obavezan | `RuleFor NotEmpty` | `Validators.required` |
+   | Kod max 3 | `MaximumLength(3)` | `Validators.maxLength(3)` |
+   | Tip obavezan | `IsInEnum()` | `Validators.required` + mat-select |
+   | Aktivan default true | `Aktivan = true` u command | `aktivan: [true]` |
+   | Jedinstven kod | Handler `AnyAsync` | — (backend only) |
+   | Toast + navigacija | — | `toaster` + `router.navigate` |
+
+10. **Test scenariji (obavezno)**
+
+    - [ ] Otvori add formu → Sačuvaj **disabled**
+    - [ ] Unesi samo naziv → još disabled (fale tip i kod)
+    - [ ] Unesi kod `ABCD` (4 znaka) → crvena greška, disabled
+    - [ ] Popuni sve ispravno → Sačuvaj **enabled** → toast → nazad na listu
+    - [ ] Novi zapis vidljiv u tabeli
+    - [ ] Swagger: POST bez naziva → **400**
+    - [ ] Swagger: POST sa kodom dužim od 3 → **400**
+    - [ ] Swagger: POST sa istim kodom dva puta → **409 Conflict**
+    - [ ] SSMS: `SELECT * FROM Dostavljaci` — novi red postoji, `Aktivan = 1`
+
+11. **Greške koje studenti najčešće prave**
+
+    | Greška | Simptom | Rješenje |
+    |--------|---------|----------|
+    | Samo frontend validacija | Swagger prihvata loše podatke | Dodaj backend validator |
+    | Nema provjere jedinstvenog koda | Dupli kod u bazi | Handler + unique index |
+    | Dugme uvijek enabled | Loši podaci idu na API | `[disabled]="form.invalid"` |
+    | Nema toast | Korisnik ne zna da je uspjelo | `toaster.success()` |
+    | Ostane na add stranici | Mora ručno nazad | `router.navigate(['/admin/dostavljaci'])` |
+    | Aktivan default false | Novi zapis neaktivan | `aktivan: [true]` u formi |
+
+12. **Debug ako ne radi**
+    - **Swagger** — testiraj POST izolirano
+    - **F12 Network** — vidi request body i status kod (201/400/409)
+    - **SSMS** — provjeri da li se red upisao u tabelu
+
 ---
 
 ### 7.3. Brisanje (Funkcionalnost brisanja)
