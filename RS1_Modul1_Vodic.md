@@ -3668,6 +3668,155 @@ protected save(): void {
 - [ ] Nakon brisanja pozovi `loadPagedData()` ili `initList()`
 - [ ] Toast success/error
 
+**Detaljno — šta tačno uraditi (backend + frontend):**
+
+1. **Tok brisanja (cijela slika)**
+   ```
+   Klik ikonica kante u tabeli
+        ↓
+   deleteAction(item) → dialogHelper.confirmDelete(item.naziv)
+        ↓
+   Modal: "Da li ste sigurni da želite obrisati Express Dostava?"
+        ↓
+   ┌─ OTKAŽI → modal se zatvara, ništa se ne dešava
+   └─ OBRIŠI → performDelete(item)
+              ↓
+              DELETE /Dostavljaci/{id}
+              ↓
+              Backend: soft delete (IsDeleted = true)
+              ↓
+              toast success → loadPagedData()
+              ↓
+              Zapis nestaje iz tabele, paginacija se ažurira
+   ```
+
+2. **Frontend — `DialogHelperService`**
+   - Servis: `src/app/modules/shared/services/dialog-helper.service.ts`
+   - Metoda: `confirmDelete(itemName: string)`
+   - Poruka iz i18n (`bs.json`):
+     ```json
+     "DELETE_CONFIRM": "Da li ste sigurni da želite obrisati \"{{name}}\"?"
+     ```
+   - `item.naziv` se automatski ubacuje umjesto `{{name}}`
+
+3. **Frontend — `deleteAction` + `performDelete`**
+
+```typescript
+import { DialogHelperService } from '../../../shared/services/dialog-helper.service';
+import { DialogButton } from '../../../shared/models/dialog-config.model';
+
+private dialogHelper = inject(DialogHelperService);
+
+deleteAction(item: ListDostavljaciQueryDto): void {
+  this.dialogHelper.confirmDelete(item.naziv).subscribe((result) => {
+    if (result && result.button === DialogButton.DELETE) {
+      this.performDelete(item);
+    }
+    // Ako Cancel → ništa ne radi
+  });
+}
+
+private performDelete(item: ListDostavljaciQueryDto): void {
+  this.startLoading();
+
+  this.api.delete(item.id).subscribe({
+    next: () => {
+      this.toaster.success(`Dostavljač "${item.naziv}" uspješno obrisan.`);
+      this.loadPagedData();  // osvježi listu + paginaciju
+    },
+    error: (err) => {
+      this.stopLoading();
+      this.toaster.error(err?.message ?? 'Greška pri brisanju.');
+      console.error('Delete dostavljac error:', err);
+    },
+  });
+}
+```
+
+4. **Frontend — HTML (dugme u tabeli)**
+
+```html
+<button mat-icon-button color="warn"
+        (click)="deleteAction(item)"
+        matTooltip="Obriši">
+  <mat-icon>delete</mat-icon>
+</button>
+```
+
+5. **Backend — `DeleteDostavljacCommandHandler` (soft delete)**
+
+```csharp
+var entity = await context.Dostavljaci
+    .FirstOrDefaultAsync(x => x.Id == request.Id, ct);
+
+if (entity is null)
+    throw new MarketNotFoundException("Dostavljač nije pronađen.");
+
+context.Dostavljaci.Remove(entity);  // soft delete — NE briše iz baze!
+await context.SaveChangesAsync(ct);
+```
+
+   - **`Remove()` u ovom projektu ≠ pravo brisanje**
+   - DbContext automatski postavlja `IsDeleted = true` (vidi `DatabaseConfiguration.cs`)
+   - Zapis **ostaje** u SSMS-u, ali sa `IsDeleted = 1`
+   - Lista ga **ne prikazuje** jer EF filtrira obrisane
+
+6. **Backend — Controller**
+
+```csharp
+[HttpDelete("{id:int}")]
+public async Task Delete(int id, CancellationToken ct)
+{
+    await sender.Send(new DeleteDostavljacCommand { Id = id }, ct);
+    // no return → 204 No Content
+}
+```
+
+7. **Mapiranje zahtjeva → implementacija**
+
+   | Zahtjev | Gdje | Kako |
+   |---------|------|------|
+   | Modal prije brisanja | Frontend | `dialogHelper.confirmDelete(naziv)` |
+   | Poruka sa nazivom | i18n + dialogHelper | `{{name}}` = `item.naziv` |
+   | Otkaži = ništa | Frontend | Ne ulazi u `if (DELETE)` |
+   | Potvrdi = obriši | Frontend | `api.delete(id)` |
+   | Osvježi listu | Frontend | `loadPagedData()` |
+   | Toast | Frontend | `toaster.success/error` |
+   | Soft delete | Backend | `Remove()` → `IsDeleted = true` |
+
+8. **Zašto `loadPagedData()` a ne `ngOnInit()`?**
+   - `loadPagedData()` — učitava sa **trenutnim** paging i search stanjem
+   - `ngOnInit()` — radi, ali nije precizno (resetuje cijelu komponentu)
+   - Nakon brisanja: `totalItems` se smanji → paginator se prilagodi
+
+9. **Test scenariji (obavezno)**
+
+   - [ ] Klik kante → modal se **pojavi** sa nazivom dostavljača
+   - [ ] Klik **Otkaži** → modal nestane, zapis **ostaje** u tabeli
+   - [ ] Klik **Obriši** → toast success, zapis **nestane** iz tabele
+   - [ ] Paginacija se ažurira (npr. sa 11 na 10 zapisa)
+   - [ ] SSMS: `SELECT * FROM Dostavljaci` → red postoji, `IsDeleted = 1`
+   - [ ] Swagger: `DELETE /Dostavljaci/{id}` → **204 No Content**
+   - [ ] Brisanje nepostojećeg Id → **404**
+
+10. **Greške koje studenti najčešće prave**
+
+    | Greška | Simptom | Rješenje |
+    |--------|---------|----------|
+    | Nema modala | Brisanje odmah | Koristi `DialogHelperService` |
+    | Nema provjere DELETE button | Briše i na Cancel | `result.button === DialogButton.DELETE` |
+    | Nema osvježavanja liste | Obrisani red još vidljiv | `loadPagedData()` nakon uspjeha |
+    | Nema toast | Korisnik ne zna da je obrisano | `toaster.success()` |
+    | Direktno `api.delete` bez modala | Krši zahtjev ispita | `deleteAction` → modal → `performDelete` |
+    | Pravo brisanje iz baze | Red nestane iz SSMS | Projekt koristi **soft delete** |
+
+11. **Debug ako ne radi**
+    - **Modal se ne pojavi** — provjeri da li je `DialogHelperService` inject-ovan
+    - **401 Unauthorized** — uloguj se kao admin
+    - **404** — pogrešan Id ili već obrisan
+    - **F12 Network** — vidi `DELETE /Dostavljaci/{id}` i status kod
+    - **SSMS** — provjeri `IsDeleted` kolonu
+
 ---
 
 ## 8. Rječnik pojmova
