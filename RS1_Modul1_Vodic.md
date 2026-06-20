@@ -2133,6 +2133,8 @@ edit/delete dugmad  →  editAction(item) / deleteAction(item)
 
 ---
 
+#### Korak 4: Generisanje Add komponente
+
 - **U CMD terminalu** (u folderu frontend projekta):
   ```
   npx ng g c modules/admin/catalogs/dostavljaci/dostavljac-add --skip-tests
@@ -2140,7 +2142,178 @@ edit/delete dugmad  →  editAction(item) / deleteAction(item)
 - **Registruj** komponentu u `admin-module.ts`
 - **Dodaj rutu** u `admin-routing-module.ts`: `dostavljaci/add`
 
-#### Korak 5: Generisanje Edit komponente
+**Detaljno — šta tačno uraditi:**
+
+1. **Terminal — koristi CMD, ne PowerShell**
+   - U PowerShellu `npm`/`ng` često ne rade
+   - U terminalu ukucaj `cmd` pa Enter
+   - Idi u folder projekta:
+     ```
+     cd rs1-frontend-2025-26
+     ```
+   - Pokreni Angular CLI:
+     ```
+     npx ng g c modules/admin/catalogs/dostavljaci/dostavljac-add --skip-tests
+     ```
+
+2. **Šta komanda kreira**
+   - Folder: `src/app/modules/admin/catalogs/dostavljaci/dostavljac-add/`
+   - Fajlovi:
+     - `dostavljac-add.component.ts`
+     - `dostavljac-add.component.html`
+     - `dostavljac-add.component.scss`
+   - Selector: `app-dostavljac-add`
+   - Klasa: `DostavljacAddComponent`
+
+3. **Registracija u `admin-module.ts`**
+   - Otvori: `src/app/modules/admin/admin-module.ts`
+   - Dodaj import na vrh:
+     ```typescript
+     import { DostavljacAddComponent } from './catalogs/dostavljaci/dostavljac-add/dostavljac-add.component';
+     ```
+   - Dodaj u `declarations` niz:
+     ```typescript
+     DostavljacAddComponent,
+     ```
+   - **Napomena:** Angular CLI ponekad automatski doda u modul — provjeri da li već postoji prije duplog dodavanja
+
+4. **Ruta u `admin-routing-module.ts`**
+   - Otvori: `src/app/modules/admin/admin-routing-module.ts`
+   - Dodaj import:
+     ```typescript
+     import { DostavljacAddComponent } from './catalogs/dostavljaci/dostavljac-add/dostavljac-add.component';
+     ```
+   - Dodaj rutu **ispod** postojeće `dostavljaci` rute (uzorak: `product-categories-2/add`):
+     ```typescript
+     // DOSTAVLJACI
+     {
+       path: 'dostavljaci',
+       component: DostavljaciComponent,
+     },
+     {
+       path: 'dostavljaci/add',
+       component: DostavljacAddComponent,
+     },
+     ```
+
+5. **Zašto ruta mora biti `dostavljaci/add`**
+   - U listi (Korak 2) imaš: `this.router.navigate(['add'], { relativeTo: this.route })`
+   - Kad si na `/admin/dostavljaci`, relativna navigacija `add` vodi na `/admin/dostavljaci/add`
+   - Ruta u routing modulu **mora** postojati da Angular zna koju komponentu učitati
+
+6. **Starter komponenta — šta dobiješ odmah**
+   - Prazna komponenta (samo `@Component` dekorator)
+   - Logiku forme dodaješ u **Koraku 6** (Reactive Form)
+   - U ovom koraku samo: generiši, registruj, rutiraj, provjeri navigaciju
+
+7. **Provjera da je korak gotov**
+   - Folder `dostavljac-add/` postoji sa 3 fajla
+   - `DostavljacAddComponent` je u `admin-module.ts` → `declarations`
+   - Ruta `dostavljaci/add` postoji u `admin-routing-module.ts`
+   - Frontend se builda bez greške
+   - Klik na „Novi dostavljač" otvara praznu add stranicu (forma dolazi u Koraku 6)
+
+**Primjer koda — isječak `admin-module.ts` (dodaci):**
+
+```typescript
+import { DostavljacAddComponent } from './catalogs/dostavljaci/dostavljac-add/dostavljac-add.component';
+
+@NgModule({
+  declarations: [
+    // ... postojeće komponente ...
+    DostavljaciComponent,
+    DostavljacAddComponent,  // NOVO
+    FaktureComponent,
+    // ...
+  ],
+  imports: [
+    AdminRoutingModule,
+    SharedModule,
+  ]
+})
+export class AdminModule { }
+```
+
+**Primjer koda — isječak `admin-routing-module.ts` (dodaci):**
+
+```typescript
+import { DostavljacAddComponent } from './catalogs/dostavljaci/dostavljac-add/dostavljac-add.component';
+
+const routes: Routes = [
+  {
+    path: '',
+    component: AdminLayoutComponent,
+    children: [
+      // ... ostale rute ...
+
+      // DOSTAVLJACI
+      {
+        path: 'dostavljaci',
+        component: DostavljaciComponent,
+      },
+      {
+        path: 'dostavljaci/add',
+        component: DostavljacAddComponent,
+      },
+
+      // ...
+    ],
+  },
+];
+```
+
+**Primjer koda — starter `dostavljac-add.component.ts` (odmah nakon generisanja):**
+
+```typescript
+import { Component } from '@angular/core';
+
+@Component({
+  selector: 'app-dostavljac-add',
+  standalone: false,
+  templateUrl: './dostavljac-add.component.html',
+  styleUrl: './dostavljac-add.component.scss',
+})
+export class DostavljacAddComponent {
+
+}
+```
+
+**Primjer koda — starter `dostavljac-add.component.html` (privremeno, dok ne dođe forma):**
+
+```html
+<div class="container">
+  <h1>Novi dostavljač</h1>
+  <p>Forma za dodavanje ide ovdje (Korak 6).</p>
+</div>
+```
+
+**Vizuelno — šta dodaješ u Koraku 4:**
+
+```
+src/app/modules/admin/
+├── admin-module.ts              ← + DostavljacAddComponent u declarations
+├── admin-routing-module.ts      ← + ruta dostavljaci/add
+└── catalogs/dostavljaci/
+    ├── dostavljaci.component.ts ← lista (Korak 2)
+    └── dostavljac-add/          ← NOVO (Korak 4)
+        ├── dostavljac-add.component.ts
+        ├── dostavljac-add.component.html
+        └── dostavljac-add.component.scss
+```
+
+**Tok navigacije:**
+
+```
+Lista (/admin/dostavljaci)
+   ↓ klik "Novi dostavljač" → onCreate()
+Router → /admin/dostavljaci/add
+   ↓
+DostavljacAddComponent se učita
+```
+
+**Sljedeći korak:** Korak 5 — generiši Edit komponentu (`dostavljac-edit`) i rutu `dostavljaci/edit/:id`.
+
+---
 
 - Isto kao Add, ali ruta: `dostavljaci/edit/:id`
 - Edit komponenta u `ngOnInit` učitava podatke po Id-u
