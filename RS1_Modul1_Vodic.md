@@ -2980,6 +2980,132 @@ toast success → nazad na listu
 - **Opcije:** možeš hardkodirati niz `{ id: 1, name: 'Ekstern' }` ili učitati iz backend enum vrijednosti
 - **Povezivanje:** `formControlName="tip"` i `[value]="tip.id"`
 
+**Detaljno — šta tačno uraditi:**
+
+1. **Zašto enum na frontendu?**
+   - Backend `DostavljacTip` šalje/prima **brojeve** (1, 2, 3), ne tekst
+   - U JSON-u: `"tip": 1` znači Ekstern
+   - Frontend mora imati iste brojeve da bi forma i API radili ispravno
+
+2. **Gdje definišeš enum (već urađeno u Koraku 1)**
+   - Fajl: `dostavljaci-api.model.ts`
+   ```typescript
+   export enum DostavljacTip {
+     Ekstern = 1,
+     Intern = 2,
+     Freelancer = 3,
+   }
+   ```
+   - **Brojevi moraju biti identični** backend enumu (`DostavljacTip.cs`)
+
+3. **Dva načina za opcije u padajućem izboru**
+
+   **Način A — TypeScript enum (preporučeno, već u Koracima 6/7):**
+   ```typescript
+   tipOptions = [
+     { value: DostavljacTip.Ekstern, label: 'Ekstern' },
+     { value: DostavljacTip.Intern, label: 'Intern' },
+     { value: DostavljacTip.Freelancer, label: 'Freelancer' },
+   ];
+   ```
+
+   **Način B — hardkodirani niz (iz zadatka):**
+   ```typescript
+   tipOptions = [
+     { id: 1, name: 'Ekstern' },
+     { id: 2, name: 'Intern' },
+     { id: 3, name: 'Freelancer' },
+   ];
+   ```
+   - Oba rade — bitno je da su **brojevi 1, 2, 3**
+
+4. **HTML — `mat-select` (Reactive Forms)**
+
+   **Sa Načinom A (enum):**
+   ```html
+   <mat-form-field appearance="outline" class="full-width">
+     <mat-label>Tip dostavljača</mat-label>
+     <mat-select formControlName="tip">
+       <mat-option *ngFor="let opt of tipOptions" [value]="opt.value">
+         {{ opt.label }}
+       </mat-option>
+     </mat-select>
+     <mat-error *ngIf="hasError('tip')">Tip je obavezan.</mat-error>
+   </mat-form-field>
+   ```
+
+   **Sa Načinom B (id/name):**
+   ```html
+   <mat-select formControlName="tip">
+     <mat-option *ngFor="let tip of tipOptions" [value]="tip.id">
+       {{ tip.name }}
+     </mat-option>
+   </mat-select>
+   ```
+
+5. **Povezivanje sa formom**
+   - `formControlName="tip"` — veže select za FormControl `tip`
+   - `[value]="opt.value"` ili `[value]="tip.id"` — **broj** koji ide u API
+   - Kad korisnik odabere „Intern", forma ima `tip: 2`
+   - Pri submitu: `{ naziv: '...', kod: 'ABC', tip: 2, aktivan: true }`
+
+6. **Edit mod — `patchValue`**
+   - API vraća `tip: 2` (broj)
+   - `form.patchValue({ tip: response.tip })` — mat-select automatski selektuje „Intern"
+   - **Ne šalji** tekst „Intern" — mora biti broj `2`
+
+7. **Prikaz u tabeli (lista) — nije mat-select**
+   - U listi ne koristiš padajući izbor — prikazuješ **badge** (Korak 3)
+   - Helper metode:
+     ```typescript
+     getTipLabel(tip: DostavljacTip): string { ... }
+     getTipClass(tip: DostavljacTip): string { ... }
+     ```
+
+8. **WinForms analogija**
+   - WinForms `ComboBox` = Angular `mat-select`
+   - `ComboBox.Items.Add("Ekstern")` = `<mat-option>Ekstern</mat-option>`
+   - `SelectedValue = 1` = `[value]="1"` + forma ima `tip: 1`
+
+9. **Provjera da radi**
+   - Add forma: odaberi tip → Sačuvaj → u SSMS/Swagger vidi `Tip = 1/2/3`
+   - Edit forma: tip je **pre-selektovan** iz baze
+   - Lista: badge prikazuje „Ekstern"/„Intern"/„Freelancer" (ne broj)
+
+**Primjer koda — kompletan enum dio u Add/Edit komponenti:**
+
+```typescript
+import { DostavljacTip } from '../../../../api-services/dostavljaci/dostavljaci-api.model';
+
+// U klasi komponente:
+DostavljacTip = DostavljacTip; // opcionalno, za template pristup enumu
+
+tipOptions = [
+  { value: DostavljacTip.Ekstern, label: 'Ekstern' },
+  { value: DostavljacTip.Intern, label: 'Intern' },
+  { value: DostavljacTip.Freelancer, label: 'Freelancer' },
+];
+
+// U FormGroup:
+this.form = this.fb.group({
+  // ...
+  tip: [null, [Validators.required]],  // null dok korisnik ne odabere
+  // ...
+});
+```
+
+**Mapiranje frontend ↔ backend:**
+
+| UI (korisnik vidi) | FormControl value | JSON u API | Baza |
+|--------------------|-------------------|------------|------|
+| Ekstern | `1` | `"tip": 1` | `1` |
+| Intern | `2` | `"tip": 2` | `2` |
+| Freelancer | `3` | `"tip": 3` | `3` |
+
+**Sljedeći korak:** Korak 9 — brisanje sa `dialogHelper` (već implementirano u listi, Korak 2).
+
+---
+
 #### Korak 9: Brisanje sa dialogHelper
 
 - **Otvori:** `products.component.ts` → metoda `onDelete`
