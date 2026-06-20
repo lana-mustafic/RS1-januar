@@ -674,6 +674,71 @@ Market.Application/
 - **Alternativa:** Pokreni API — u `Program.cs` se automatski poziva `MigrateAsync()` pri startu
 - **Provjeri u SSMS-u:** da li postoji nova tabela u tvojoj bazi
 
+**Detaljno — šta tačno uraditi (i kojim redom):**
+
+1. **Preuslovi (prije migracije)**
+   - Završeni Koraci 1–4:
+     - Imaš `DostavljacTip` enum
+     - Imaš `DostavljacEntity`
+     - Imaš `DostavljacConfiguration` (EF konfiguracija) sa unique index na `Kod`
+     - Imaš `DbSet<DostavljacEntity> Dostavljaci` u `DatabaseContext` i u `IAppDbContext`
+   - Provjeri `Market.API/appsettings.json` → connection string pokazuje na **tvoju bazu** (npr. `IB2xxxxx`)
+
+2. **Varijanta A (preporučeno na ispitu): Package Manager Console u Visual Studiju**
+   - U Visual Studiju otvori: **Tools → NuGet Package Manager → Package Manager Console**
+   - U PMC prozoru obavezno podesi:
+     - **Default project**: `Market.Infrastructure`
+   - Komande (primjer imena migracije — ime je proizvoljno, ali neka bude smisleno):
+
+```
+Add-Migration add-dostavljaci
+Update-Database
+```
+
+   - Šta očekuješ:
+     - `Add-Migration ...` kreira novi folder/fajl u `Market.Infrastructure/Migrations/` (C# migracioni fajl)
+     - `Update-Database` primijeni migraciju na tvoju bazu (kreira tabelu + indexe)
+
+3. **Varijanta B (ako PMC pravi probleme): dotnet-ef iz terminala**
+   - Ovo radi samo ako imaš instalirane EF Core tools i ako znaš putanje do projekata.
+   - U root folderu solution-a pokreni (primjer, prilagodi putanje ako su drugačije):
+
+```bash
+dotnet ef migrations add add-dostavljaci --project rs1_backend-2025-26/Market.Infrastructure --startup-project rs1_backend-2025-26/Market.API
+dotnet ef database update --project rs1_backend-2025-26/Market.Infrastructure --startup-project rs1_backend-2025-26/Market.API
+```
+
+   - Ako ti `dotnet ef` nije prepoznat, na ispitu se nemoj zadržavati na ovome — vrati se na PMC (Varijanta A).
+
+4. **Alternativa (auto-migracija pri startu API-ja) — kada i kako**
+   - U ovom template-u postoji automatsko pozivanje migracija pri pokretanju API-ja (u `Program.cs` se poziva `MigrateAsync()`).
+   - Šta to znači praktično:
+     - Ako pokreneš `Market.API` (F5) i sve je ispravno podešeno, aplikacija će pokušati sama primijeniti pending migracije.
+   - Bitno:
+     - Ovo **ne zamjenjuje** `Add-Migration` — i dalje moraš *napraviti* migraciju kad dodaš novi entitet.
+     - Auto-migracija samo pomaže da se migracije **primijene** na bazu pri startu.
+
+5. **Provjera u SSMS-u (obavezno)**
+   - Otvori SSMS i konektuj se na server (onaj iz uputa).
+   - Otvori svoju bazu → **Tables**:
+     - Očekuješ tabelu: `Dostavljaci`
+     - Očekuješ i EF tabelu: `__EFMigrationsHistory`
+   - Brza provjera preko SQL upita:
+
+```sql
+SELECT TOP (50) *
+FROM Dostavljaci;
+```
+
+   - Provjera unique indexa na `Kod`:
+     - U SSMS: `Dostavljaci` → **Indexes** → vidi da postoji unique index na `Kod`
+     - Ili test: probaj unijeti dva reda sa istim `Kod` (kasnije kroz API) → baza/handler treba to blokirati
+
+6. **Najčešće greške (i kako ih prepoznaš brzo)**
+   - **Migracija se kreira, ali tabela nije u tvojoj bazi**: connection string pokazuje na pogrešnu bazu.
+   - **Update-Database puca**: nedostaje `DbSet`/konfiguracija ili je build već crven — prvo popravi build.
+   - **Ne vidiš unique na Kod**: nisi dodala `HasIndex(x => x.Kod).IsUnique()` ili migracija nije rerun-ovana (napravi novu migraciju).
+
 #### Korak 6: CQRS — List (Query)
 
 - **Otvori folder:** `ProductCategories/Queries/List/`
