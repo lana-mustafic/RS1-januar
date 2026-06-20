@@ -472,6 +472,41 @@ Market.Domain/
    - Ima: `ToTable`, `IsRequired` na svim poljima, `HasMaxLength` na Naziv i Kod, `HasIndex(...).IsUnique()` na Kod
    - Solution se **builda bez greške**
 
+**Primjer koda (ispravno) — `DostavljacConfiguration.cs`:**
+
+```csharp
+using Market.Domain.Entities.Dostavljaci;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Metadata.Builders;
+
+namespace Market.Infrastructure.Database.Configurations.Dostavljaci;
+
+public sealed class DostavljacConfiguration : IEntityTypeConfiguration<DostavljacEntity>
+{
+    public void Configure(EntityTypeBuilder<DostavljacEntity> builder)
+    {
+        builder.ToTable("Dostavljaci");
+
+        builder.Property(x => x.Naziv)
+            .IsRequired()
+            .HasMaxLength(DostavljacEntity.Constraints.NazivMaxLength);
+
+        builder.Property(x => x.Kod)
+            .IsRequired()
+            .HasMaxLength(DostavljacEntity.Constraints.KodMaxLength);
+
+        builder.Property(x => x.Tip)
+            .IsRequired();
+
+        builder.Property(x => x.Aktivan)
+            .IsRequired();
+
+        builder.HasIndex(x => x.Kod)
+            .IsUnique();
+    }
+}
+```
+
 **Vizuelno — šta dodaješ u Koraku 3:**
 
 ```
