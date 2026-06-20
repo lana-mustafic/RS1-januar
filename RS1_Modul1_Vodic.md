@@ -2758,6 +2758,222 @@ Lista se učita → novi zapis vidljiv
   - `loadData()` učitava postojeći zapis preko `getById`
   - `save()` poziva `update` umjesto `create`
 
+**Detaljno — šta tačno uraditi:**
+
+1. **Gdje pišeš kod**
+   - `dostavljac-edit.component.ts` — proširi starter iz Koraka 5
+   - `dostavljac-edit.component.html` — **kopiraj** HTML iz Add (Korak 6), promijeni naslov u „Uredi dostavljača"
+
+2. **Razlika Add vs Edit — 3 ključne stvari**
+
+   | | Add (Korak 6) | Edit (Korak 7) |
+   |---|---------------|----------------|
+   | `initForm(...)` | `initForm(false)` | `initForm(true)` |
+   | `loadData()` | prazno | `getById(id)` + `form.patchValue(...)` |
+   | `save()` | `api.create(...)` | `api.update(id, ...)` |
+
+3. **`ngOnInit` — redoslijed**
+   1. Pročitaj Id iz rute: `this.dostavljacId = +this.route.snapshot.params['id'];`
+   2. Kreiraj praznu formu (isti `FormGroup` kao Add)
+   3. Pozovi `this.initForm(true)` — automatski poziva `loadData()`
+
+4. **`loadData()` — učitavanje postojećeg zapisa**
+   - `startLoading()`
+   - `api.getById(this.dostavljacId).subscribe(...)`
+   - U `next`:
+     - `this.model = response`
+     - `this.form.patchValue({ naziv, kod, tip, aktivan })` — popuni formu
+     - `stopLoading()`
+   - U `error`: toast + navigacija na listu
+
+5. **`save()` — update umjesto create**
+   - Isti validatori kao Add
+   - `UpdateDostavljacCommand` iz `form.value`
+   - `api.update(this.dostavljacId, command)`
+   - Success: toast + `router.navigate(['/admin/dostavljaci'])`
+
+6. **HTML**
+   - **Isti** kao Add — samo naslov i eventualno prikaži Id
+   - `[disabled]="form.invalid || isLoading"` ostaje isto
+
+7. **Provjera da je korak gotov**
+   - Klik „Uredi" u listi → forma **popunjena** postojećim podacima
+   - Izmjena + Sačuvaj → toast + nazad na listu
+   - Izmjene vidljive u tabeli
+   - Dupli kod → greška sa backend-a
+
+**Primjer koda — `dostavljac-edit.component.ts`:**
+
+```typescript
+import { Component, inject, OnInit } from '@angular/core';
+import { FormBuilder, Validators } from '@angular/forms';
+import { ActivatedRoute, Router } from '@angular/router';
+import { BaseFormComponent } from '../../../../core/components/base-classes/base-form-component';
+import { DostavljaciApiService } from '../../../../api-services/dostavljaci/dostavljaci-api.service';
+import {
+  DostavljacTip,
+  GetDostavljacByIdQueryDto,
+  UpdateDostavljacCommand,
+} from '../../../../api-services/dostavljaci/dostavljaci-api.model';
+import { ToasterService } from '../../../../core/services/toaster.service';
+
+@Component({
+  selector: 'app-dostavljac-edit',
+  standalone: false,
+  templateUrl: './dostavljac-edit.component.html',
+  styleUrl: './dostavljac-edit.component.scss',
+})
+export class DostavljacEditComponent
+  extends BaseFormComponent<GetDostavljacByIdQueryDto>
+  implements OnInit
+{
+  private api = inject(DostavljaciApiService);
+  private route = inject(ActivatedRoute);
+  private router = inject(Router);
+  private toaster = inject(ToasterService);
+  private fb = inject(FormBuilder);
+
+  dostavljacId!: number;
+
+  tipOptions = [
+    { value: DostavljacTip.Ekstern, label: 'Ekstern' },
+    { value: DostavljacTip.Intern, label: 'Intern' },
+    { value: DostavljacTip.Freelancer, label: 'Freelancer' },
+  ];
+
+  ngOnInit(): void {
+    this.dostavljacId = +this.route.snapshot.params['id'];
+
+    if (!this.dostavljacId || this.dostavljacId <= 0) {
+      this.toaster.error('Neispravan ID dostavljača.');
+      this.router.navigate(['/admin/dostavljaci']);
+      return;
+    }
+
+    // Ista forma kao Add
+    this.form = this.fb.group({
+      naziv: ['', [Validators.required]],
+      tip: [null, [Validators.required]],
+      kod: ['', [Validators.required, Validators.maxLength(3)]],
+      aktivan: [true],
+    });
+
+    this.initForm(true); // Edit mode → automatski poziva loadData()
+  }
+
+  protected loadData(): void {
+    this.startLoading();
+
+    this.api.getById(this.dostavljacId).subscribe({
+      next: (response) => {
+        this.model = response;
+        this.form.patchValue({
+          naziv: response.naziv,
+          kod: response.kod,
+          tip: response.tip,
+          aktivan: response.aktivan,
+        });
+        this.stopLoading();
+      },
+      error: (err) => {
+        this.stopLoading(err?.message ?? 'Dostavljač nije pronađen.');
+        this.toaster.error(err?.message ?? 'Dostavljač nije pronađen.');
+        console.error('Load dostavljac error:', err);
+        this.router.navigate(['/admin/dostavljaci']);
+      },
+    });
+  }
+
+  protected save(): void {
+    if (this.form.invalid || this.isLoading) {
+      return;
+    }
+
+    this.startLoading();
+
+    const command: UpdateDostavljacCommand = {
+      naziv: this.form.value.naziv?.trim(),
+      kod: this.form.value.kod?.trim(),
+      tip: this.form.value.tip,
+      aktivan: this.form.value.aktivan ?? true,
+    };
+
+    this.api.update(this.dostavljacId, command).subscribe({
+      next: () => {
+        this.stopLoading();
+        this.toaster.success('Dostavljač uspješno ažuriran.');
+        this.router.navigate(['/admin/dostavljaci']);
+      },
+      error: (err) => {
+        this.stopLoading(err?.message ?? 'Greška pri ažuriranju.');
+        this.toaster.error(err?.message ?? 'Greška pri ažuriranju.');
+        console.error('Update dostavljac error:', err);
+      },
+    });
+  }
+
+  onCancel(): void {
+    this.router.navigate(['/admin/dostavljaci']);
+  }
+
+  getErrorMessage(controlName: string): string {
+    const control = this.form.get(controlName);
+    if (!control || !control.errors) return '';
+
+    if (control.errors['required']) return 'Polje je obavezno.';
+    if (control.errors['maxlength']) return 'Kod može imati najviše 3 karaktera.';
+    return 'Neispravna vrijednost.';
+  }
+}
+```
+
+**Primjer koda — `dostavljac-edit.component.html`:**
+
+```html
+<!-- Isti HTML kao dostavljac-add.component.html, samo promijeni naslov: -->
+<div class="container">
+  <div class="header-card">
+    <h1>Uredi dostavljača</h1>
+    <p *ngIf="model">ID: {{ model.id }}</p>
+  </div>
+
+  <div class="form-card" *ngIf="!isLoading || form.dirty">
+    <form [formGroup]="form" (ngSubmit)="onSubmit()">
+      <!-- ... isti sadržaj kao Add: naziv, kod, tip, aktivan, dugmad ... -->
+    </form>
+  </div>
+
+  <div *ngIf="isLoading && !model" class="loading-overlay">
+    <mat-spinner diameter="50"></mat-spinner>
+    <p>Učitavanje...</p>
+  </div>
+</div>
+```
+
+**Napomena:** Za HTML možeš doslovno **kopirati** cijeli `dostavljac-add.component.html` i samo promijeniti `<h1>` u „Uredi dostavljača".
+
+**Vizuelni tok — izmjena:**
+
+```
+Lista → klik "Uredi" (id=5)
+   ↓
+/admin/dostavljaci/edit/5
+   ↓
+ngOnInit → forma prazna → initForm(true) → loadData()
+   ↓
+getById(5) → patchValue({ naziv, kod, tip, aktivan })
+   ↓
+Korisnik izmijeni polja → Sačuvaj → save()
+   ↓
+api.update(5, command) → PUT /Dostavljaci/5
+   ↓
+toast success → nazad na listu
+```
+
+**Sljedeći korak:** Korak 8–10 — brisanje (već u listi), routing provjera, testiranje cijelog toka.
+
+---
+
 #### Korak 8: Enum na frontendu — padajući izbor (ComboBox)
 
 - **Za tip dostavljača** koristi `mat-select`
