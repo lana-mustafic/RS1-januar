@@ -1890,7 +1890,248 @@ HTML (Korak 3) prikazuje this.items u mat-table
   - `*ngFor` ili `[dataSource]` za prikaz podataka
 - **Tip prikaži** kao badge (boje su u CSS-u templatea)
 
-#### Korak 4: Generisanje Add komponente
+**Detaljno — šta tačno uraditi:**
+
+1. **Starter stanje**
+   - HTML već ima **header karticu** (naslov, search polje, dugme „Novi dostavljač")
+   - Ima **info karticu** („Ovdje raditi ispitni zadatak...")
+   - Nema tabele, nema paginacije, nema bindinga — to dodaješ ti
+
+2. **Uzorci koje otvoriš**
+   - **`products.component.html`** — `mat-table`, `[dataSource]="items"`, `matColumnDef`, akcije, paginator
+   - **`fakture.component.html`** — prikaz **Tip** kao badge sa `[ngClass]`
+   - **`product-categories-2.component.html`** — `(keydown)="inputKeyDown($event)"`, `[(ngModel)]="searchValue"`
+
+3. **Header — poveži sa TS metodama (ne diraj dizajn, samo dodaj binding)**
+
+   | Element | Binding |
+   |---------|---------|
+   | Search input | `[(ngModel)]="searchValue"` + `(keydown)="inputKeyDown($event)"` |
+   | Dugme „Novi dostavljač" | `(click)="onCreate()"` |
+
+4. **Tabela — `mat-table` struktura**
+   - `[dataSource]="items"` — podaci iz `BaseListPagedComponent`
+   - Za svaku kolonu: `<ng-container matColumnDef="naziv">` (i kod, tip, aktivan, actions)
+   - Header red: `<tr mat-header-row *matHeaderRowDef="displayedColumns">`
+   - Data red: `<tr mat-row *matRowDef="let row; columns: displayedColumns">`
+   - `displayedColumns` definisan u TS (Korak 2)
+
+5. **Kolone — šta prikazuješ**
+
+   | Kolona | Sadržaj |
+   |--------|---------|
+   | `naziv` | `{{ item.naziv }}` |
+   | `kod` | `{{ item.kod }}` (bold) |
+   | `tip` | badge sa `getTipLabel(item.tip)` i `[ngClass]="getTipClass(item.tip)"` |
+   | `aktivan` | ikonica `check_circle` / `cancel` ili „Da"/„Ne" |
+   | `actions` | dugmad edit + delete |
+
+6. **Tip kao badge — treba 2 helper metode u TS**
+   - U `dostavljaci.component.ts` dodaj `getTipLabel(tip)` i `getTipClass(tip)` (vidi primjer ispod)
+   - U `dostavljaci.component.scss` dodaj `.tip-badge` klase (kao kod Faktura)
+
+7. **Loading i prazna lista**
+   - `*ngIf="isLoading"` → spinner ili tekst
+   - `*ngIf="!isLoading && totalItems === 0"` → slika `images/no-data.png` ili poruka
+   - Tabelu prikaži kad `!isLoading && totalItems > 0`
+
+8. **Paginator**
+   - Na dnu tabele: `<app-fit-paginator-bar [vm]="this" />`
+   - `[vm]="this"` — komponenta nasljeđuje paging (`goToPage`, `totalItems`...)
+
+9. **Info karticu**
+   - Možeš **ukloniti** kad lista radi, ili ostaviti dok ne završiš cijeli modul
+
+10. **Provjera da je korak gotov**
+    - Search reaguje na Enter
+    - Tabela prikazuje podatke iz API-ja
+    - Edit/delete dugmad rade
+    - Paginator pri dnu
+    - Tip se vidi kao obojeni badge
+
+**Dopuna u TS — helper metode za badge (dodaj u `dostavljaci.component.ts`):**
+
+```typescript
+import { DostavljacTip } from '../../../../api-services/dostavljaci/dostavljaci-api.model';
+
+getTipLabel(tip: DostavljacTip): string {
+  switch (tip) {
+    case DostavljacTip.Ekstern: return 'Ekstern';
+    case DostavljacTip.Intern: return 'Intern';
+    case DostavljacTip.Freelancer: return 'Freelancer';
+    default: return '';
+  }
+}
+
+getTipClass(tip: DostavljacTip): string {
+  switch (tip) {
+    case DostavljacTip.Ekstern: return 'ekstern';
+    case DostavljacTip.Intern: return 'intern';
+    case DostavljacTip.Freelancer: return 'freelancer';
+    default: return '';
+  }
+}
+```
+
+**Dopuna u SCSS — badge stilovi (dodaj u `dostavljaci.component.scss`):**
+
+```scss
+.table-card {
+  background: white;
+  border-radius: 16px;
+  overflow: hidden;
+  box-shadow: 0 2px 8px rgba(73, 118, 181, 0.08);
+  border: 1px solid rgba(73, 118, 181, 0.15);
+}
+
+.tip-badge {
+  display: inline-block;
+  padding: 6px 14px;
+  border-radius: 20px;
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+
+  &.ekstern {
+    background-color: #e3f2fd;
+    color: #1565c0;
+  }
+
+  &.intern {
+    background-color: #e8f5e9;
+    color: #2e7d32;
+  }
+
+  &.freelancer {
+    background-color: #fff3e0;
+    color: #e65100;
+  }
+}
+
+.icon-enabled { color: #66bb6a; }
+.icon-disabled { color: #ef5350; }
+```
+
+**Primjer koda (ispravno) — `dostavljaci.component.html`:**
+
+```html
+<div class="container">
+  <!-- Header Card (starter dizajn + binding) -->
+  <div class="header-card">
+    <div class="header-card-content">
+      <div class="title-section">
+        <div class="title-icon">
+          <mat-icon>local_shipping</mat-icon>
+        </div>
+        <h1>Dostavljači</h1>
+      </div>
+
+      <div class="actions-container">
+        <mat-form-field class="search-field" appearance="outline">
+          <mat-label>Pretraga...</mat-label>
+          <input
+            matInput
+            placeholder="Pretraži dostavljače..."
+            [(ngModel)]="searchValue"
+            (keydown)="inputKeyDown($event)"
+          />
+          <mat-icon matSuffix>search</mat-icon>
+        </mat-form-field>
+
+        <button mat-raised-button color="primary" (click)="onCreate()">
+          <mat-icon>add</mat-icon>
+          Novi dostavljač
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Loading -->
+  <div *ngIf="isLoading" class="loading-container">
+    <mat-spinner diameter="40"></mat-spinner>
+    <p>Učitavanje...</p>
+  </div>
+
+  <!-- No data -->
+  <div *ngIf="!isLoading && totalItems === 0" class="no-data">
+    <img src="images/no-data.png" alt="Nema podataka" />
+    <p>Nema dostavljača za prikaz.</p>
+  </div>
+
+  <!-- Table -->
+  <div class="table-card" *ngIf="!isLoading && totalItems > 0">
+    <table mat-table [dataSource]="items">
+      <!-- Naziv -->
+      <ng-container matColumnDef="naziv">
+        <th mat-header-cell *matHeaderCellDef>NAZIV</th>
+        <td mat-cell *matCellDef="let item">
+          <span style="font-weight: 500">{{ item.naziv }}</span>
+        </td>
+      </ng-container>
+
+      <!-- Kod -->
+      <ng-container matColumnDef="kod">
+        <th mat-header-cell *matHeaderCellDef>KOD</th>
+        <td mat-cell *matCellDef="let item">
+          <span style="font-weight: 600">{{ item.kod }}</span>
+        </td>
+      </ng-container>
+
+      <!-- Tip (badge) -->
+      <ng-container matColumnDef="tip">
+        <th mat-header-cell *matHeaderCellDef>TIP</th>
+        <td mat-cell *matCellDef="let item">
+          <span class="tip-badge" [ngClass]="getTipClass(item.tip)">
+            {{ getTipLabel(item.tip) }}
+          </span>
+        </td>
+      </ng-container>
+
+      <!-- Aktivan -->
+      <ng-container matColumnDef="aktivan">
+        <th mat-header-cell *matHeaderCellDef>AKTIVAN</th>
+        <td mat-cell *matCellDef="let item">
+          <mat-icon [ngClass]="item.aktivan ? 'icon-enabled' : 'icon-disabled'">
+            {{ item.aktivan ? 'check_circle' : 'cancel' }}
+          </mat-icon>
+        </td>
+      </ng-container>
+
+      <!-- Akcije -->
+      <ng-container matColumnDef="actions">
+        <th mat-header-cell *matHeaderCellDef>AKCIJE</th>
+        <td mat-cell *matCellDef="let item">
+          <button mat-icon-button color="primary" (click)="editAction(item)" matTooltip="Uredi">
+            <mat-icon>edit</mat-icon>
+          </button>
+          <button mat-icon-button color="warn" (click)="deleteAction(item)" matTooltip="Obriši">
+            <mat-icon>delete</mat-icon>
+          </button>
+        </td>
+      </ng-container>
+
+      <tr mat-header-row *matHeaderRowDef="displayedColumns"></tr>
+      <tr mat-row *matRowDef="let row; columns: displayedColumns"></tr>
+    </table>
+
+    <app-fit-paginator-bar [vm]="this" />
+  </div>
+</div>
+```
+
+**Vizuelno — šta povezuješ:**
+
+```
+searchValue + (keydown Enter)  →  searchAction()  →  API  →  items
+items  →  mat-table [dataSource]
+displayedColumns  →  matColumnDef kolone
+[vm]="this"  →  paginator (page, totalItems, goToPage)
+edit/delete dugmad  →  editAction(item) / deleteAction(item)
+```
+
+**Sljedeći korak:** Korak 4 — generiši Add komponentu (`dostavljac-add`).
+
+---
 
 - **U CMD terminalu** (u folderu frontend projekta):
   ```
