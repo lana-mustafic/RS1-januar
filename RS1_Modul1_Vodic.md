@@ -2315,8 +2315,191 @@ DostavljacAddComponent se učita
 
 ---
 
+#### Korak 5: Generisanje Edit komponente
+
 - Isto kao Add, ali ruta: `dostavljaci/edit/:id`
 - Edit komponenta u `ngOnInit` učitava podatke po Id-u
+
+**Detaljno — šta tačno uraditi:**
+
+1. **Terminal — CMD (isto kao Korak 4)**
+   ```
+   cd rs1-frontend-2025-26
+   npx ng g c modules/admin/catalogs/dostavljaci/dostavljac-edit --skip-tests
+   ```
+
+2. **Šta komanda kreira**
+   - Folder: `src/app/modules/admin/catalogs/dostavljaci/dostavljac-edit/`
+   - Klasa: `DostavljacEditComponent`
+   - Selector: `app-dostavljac-edit`
+
+3. **Registracija u `admin-module.ts`**
+   - Import:
+     ```typescript
+     import { DostavljacEditComponent } from './catalogs/dostavljaci/dostavljac-edit/dostavljac-edit.component';
+     ```
+   - U `declarations`:
+     ```typescript
+     DostavljacEditComponent,
+     ```
+
+4. **Ruta u `admin-routing-module.ts`**
+   - Import `DostavljacEditComponent`
+   - Dodaj rutu:
+     ```typescript
+     {
+       path: 'dostavljaci/edit/:id',
+       component: DostavljacEditComponent,
+     },
+     ```
+   - **Bitno:** parametar se zove `:id` — mora se poklapati sa listom:
+     - Lista (Korak 2): `navigate(['edit', item.id], { relativeTo: this.route })`
+     - URL postaje: `/admin/dostavljaci/edit/5`
+     - U edit komponenti čitaš: `this.route.snapshot.params['id']`
+
+5. **`ngOnInit` — učitavanje podataka po Id-u**
+   - Inject: `ActivatedRoute`, `DostavljaciApiService`, `ToasterService`, `Router`
+   - U `ngOnInit`:
+     1. Pročitaj Id iz rute: `this.dostavljacId = +this.route.snapshot.params['id'];`
+     2. Pozovi `api.getById(this.dostavljacId)`
+     3. U `next`: spremi DTO u property (npr. `this.model = response`)
+     4. U `error`: toast + navigacija nazad na listu
+   - **Formu** (`FormGroup`, `patchValue`) dodaješ u **Koraku 7** — ovdje je dovoljno da podaci stignu sa API-ja
+
+6. **Razlika Add vs Edit**
+
+   | | Add (Korak 4) | Edit (Korak 5) |
+   |---|---------------|----------------|
+   | Ruta | `dostavljaci/add` | `dostavljaci/edit/:id` |
+   | Id u URL | nema | ima (`:id`) |
+   | ngOnInit | prazno (forma u Koraku 6) | `getById(id)` |
+   | API poziv | `create()` (Korak 6) | `getById()` sada, `update()` (Korak 7) |
+
+7. **Provjera da je korak gotov**
+   - Folder `dostavljac-edit/` postoji
+   - Komponenta registrovana u `admin-module.ts`
+   - Ruta `dostavljaci/edit/:id` u routing modulu
+   - Klik „Uredi" u listi otvara edit stranicu
+   - U konzoli/network vidiš `GET /Dostavljaci/{id}`
+   - Podaci se učitavaju (barem u TS property, ili privremeno prikaži u HTML)
+
+**Primjer koda — isječak `admin-routing-module.ts` (dodaci):**
+
+```typescript
+import { DostavljacEditComponent } from './catalogs/dostavljaci/dostavljac-edit/dostavljac-edit.component';
+
+// DOSTAVLJACI
+{
+  path: 'dostavljaci',
+  component: DostavljaciComponent,
+},
+{
+  path: 'dostavljaci/add',
+  component: DostavljacAddComponent,
+},
+{
+  path: 'dostavljaci/edit/:id',
+  component: DostavljacEditComponent,
+},
+```
+
+**Primjer koda — `dostavljac-edit.component.ts` (učitavanje po Id-u):**
+
+```typescript
+import { Component, inject, OnInit } from '@angular/core';
+import { ActivatedRoute, Router } from '@angular/router';
+import { DostavljaciApiService } from '../../../../api-services/dostavljaci/dostavljaci-api.service';
+import { GetDostavljacByIdQueryDto } from '../../../../api-services/dostavljaci/dostavljaci-api.model';
+import { BaseComponent } from '../../../../core/components/base-classes/base-component';
+import { ToasterService } from '../../../../core/services/toaster.service';
+
+@Component({
+  selector: 'app-dostavljac-edit',
+  standalone: false,
+  templateUrl: './dostavljac-edit.component.html',
+  styleUrl: './dostavljac-edit.component.scss',
+})
+export class DostavljacEditComponent extends BaseComponent implements OnInit {
+  private route = inject(ActivatedRoute);
+  private router = inject(Router);
+  private api = inject(DostavljaciApiService);
+  private toaster = inject(ToasterService);
+
+  dostavljacId!: number;
+  model: GetDostavljacByIdQueryDto | null = null;
+
+  ngOnInit(): void {
+    this.dostavljacId = +this.route.snapshot.params['id'];
+
+    if (!this.dostavljacId || this.dostavljacId <= 0) {
+      this.toaster.error('Neispravan ID dostavljača.');
+      this.router.navigate(['/admin/dostavljaci']);
+      return;
+    }
+
+    this.loadDostavljac();
+  }
+
+  private loadDostavljac(): void {
+    this.startLoading();
+
+    this.api.getById(this.dostavljacId).subscribe({
+      next: (response) => {
+        this.model = response;
+        this.stopLoading();
+        // Korak 7: ovdje ide form.patchValue(response)
+      },
+      error: (err) => {
+        this.stopLoading();
+        this.toaster.error(err?.message ?? 'Dostavljač nije pronađen.');
+        console.error('Load dostavljac error:', err);
+        this.router.navigate(['/admin/dostavljaci']);
+      },
+    });
+  }
+}
+```
+
+**Primjer koda — privremeni `dostavljac-edit.component.html` (dok ne dođe forma u Koraku 7):**
+
+```html
+<div class="container">
+  <h1>Uredi dostavljača</h1>
+
+  <div *ngIf="isLoading">Učitavanje...</div>
+
+  <div *ngIf="!isLoading && model">
+    <p><strong>ID:</strong> {{ model.id }}</p>
+    <p><strong>Naziv:</strong> {{ model.naziv }}</p>
+    <p><strong>Kod:</strong> {{ model.kod }}</p>
+    <p><strong>Tip:</strong> {{ model.tip }}</p>
+    <p><strong>Aktivan:</strong> {{ model.aktivan ? 'Da' : 'Ne' }}</p>
+    <p><em>Reactive forma ide ovdje (Korak 7).</em></p>
+  </div>
+</div>
+```
+
+**Vizuelno — tok edit navigacije:**
+
+```
+Lista → klik "Uredi" na redu
+   ↓
+editAction(item) → navigate(['edit', item.id])
+   ↓
+URL: /admin/dostavljaci/edit/5
+   ↓
+DostavljacEditComponent.ngOnInit()
+   ↓
+route.params['id'] → 5
+   ↓
+api.getById(5) → GetDostavljacByIdQueryDto
+   ↓
+model = response (Korak 7: patchValue u formu)
+```
+
+**Sljedeći korak:** Korak 6 — Reactive Form za **dodavanje** (`dostavljac-add`).
+
+---
 
 #### Korak 6: Reactive Form — dodavanje
 
