@@ -1132,6 +1132,132 @@ public sealed class DeleteDostavljacCommandHandler(IAppDbContext context, IAppCu
 - **MediatR:** Controller ne radi posao sam — šalje command/query preko `ISender sender`
 - **Testiraj:** Pokreni API, otvori Swagger (`https://localhost:7001/swagger` ili port iz launchSettings)
 
+**Detaljno — šta tačno uraditi:**
+
+1. **Gdje kreirati fajl**
+   - Projekt: `Market.API`
+   - Putanja: `Controllers/DostavljaciController.cs`
+   - Uzorak: `Controllers/ProductCategoriesController.cs`
+
+2. **Šta controller radi (i šta NE radi)**
+   - Controller je **tanka** HTTP „prosljeđivačica":
+     - prima HTTP zahtjev (route, body, query string)
+     - pozove MediatR: `await sender.Send(...)`
+     - vrati HTTP odgovor (200/201/204)
+   - Controller **ne smije**:
+     - direktno koristiti `DatabaseContext`
+     - pisati LINQ upite
+     - raditi validaciju poslovnih pravila (to je u handleru/validatoru)
+
+3. **Obavezni `using`-i na vrhu fajla**
+   - Importuj sve command/query tipove koje koristiš:
+     - `...Commands.Create`
+     - `...Commands.Update`
+     - `...Commands.Delete`
+     - `...Queries.GetById`
+     - `...Queries.List`
+
+4. **Atributi klase (kopiraj obrazac)**
+   - `[ApiController]` — automatska validacija modela, binding
+   - `[Route("[controller]")]` — ruta postaje `/Dostavljaci` (ime kontrolera bez „Controller")
+   - `[Authorize(Policy = "AdminOnly")]` — samo admin može Create/Update/Delete
+   - Primary constructor: `public class DostavljaciController(ISender sender) : ControllerBase`
+
+5. **Mapiranje endpointa — tačno šta ide gdje**
+
+   | HTTP | Ruta | Metoda u controlleru | MediatR poziv |
+   |------|------|----------------------|---------------|
+   | GET | `/Dostavljaci` | `List(...)` | `sender.Send(query, ct)` |
+   | GET | `/Dostavljaci/{id}` | `GetById(id, ...)` | `sender.Send(new GetDostavljacByIdQuery { Id = id }, ct)` |
+   | POST | `/Dostavljaci` | `Create(...)` | `sender.Send(command, ct)` → vrati `CreatedAtAction` |
+   | PUT | `/Dostavljaci/{id}` | `Update(id, command, ...)` | `command.Id = id; sender.Send(command, ct)` |
+   | DELETE | `/Dostavljaci/{id}` | `Delete(id, ...)` | `sender.Send(new DeleteDostavljacCommand { Id = id }, ct)` |
+
+6. **Bitne sitnice koje često pobjegnu**
+   - **Update:** Id iz URL-a **prepisuje** Id iz body-ja:
+     - `command.Id = id;` (zbog `[JsonIgnore]` na command Id property-ju)
+   - **List:** koristi `[FromQuery] ListDostavljaciQuery query` — paging + search dolaze iz query stringa
+   - **Create:** vrati `201 Created` preko `CreatedAtAction(nameof(GetById), new { id }, new { id })`
+   - **Delete/Update:** bez return → automatski `204 No Content`
+   - **GetById + List:** u uzorku imaju `[AllowAnonymous]` — za Dostavljača možeš isto (ili ostavi samo admin, zavisi od zadatka)
+
+7. **Swagger test — redoslijed na ispitu**
+   1. Pokreni `Market.API` (F5)
+   2. Otvori Swagger (port iz `launchSettings.json`, često `7001`)
+   3. Uloguj se / authorize (admin token) za POST/PUT/DELETE
+   4. Testiraj redom:
+      - `POST /Dostavljaci` — kreiraj zapis
+      - `GET /Dostavljaci` — vidi listu (+ `?Search=...&Paging.Page=1&Paging.PageSize=10`)
+      - `GET /Dostavljaci/{id}` — vidi jedan zapis
+      - `PUT /Dostavljaci/{id}` — izmijeni
+      - `DELETE /Dostavljaci/{id}` — obriši (soft delete)
+
+8. **Provjera da je korak gotov**
+   - U Swaggeru vidiš svih 5 endpointa pod `Dostavljaci`
+   - Create vraća `201` sa novim Id
+   - List vraća `PageResult` sa paginacijom
+   - GetById za nepostojeći Id → `404`
+   - Dupli Kod pri Create → `409 Conflict` (iz handlera)
+
+**Primjer koda (ispravno) — `DostavljaciController.cs`:**
+
+```csharp
+using Market.Application.Modules.Catalog.Dostavljaci.Commands.Create;
+using Market.Application.Modules.Catalog.Dostavljaci.Commands.Delete;
+using Market.Application.Modules.Catalog.Dostavljaci.Commands.Update;
+using Market.Application.Modules.Catalog.Dostavljaci.Queries.GetById;
+using Market.Application.Modules.Catalog.Dostavljaci.Queries.List;
+
+namespace Market.API.Controllers;
+
+[ApiController]
+[Route("[controller]")]
+[Authorize(Policy = "AdminOnly")]
+public class DostavljaciController(ISender sender) : ControllerBase
+{
+    [HttpPost]
+    public async Task<ActionResult<int>> Create(CreateDostavljacCommand command, CancellationToken ct)
+    {
+        int id = await sender.Send(command, ct);
+        return CreatedAtAction(nameof(GetById), new { id }, new { id });
+    }
+
+    [HttpPut("{id:int}")]
+    public async Task Update(int id, UpdateDostavljacCommand command, CancellationToken ct)
+    {
+        // ID from the route takes precedence
+        command.Id = id;
+        await sender.Send(command, ct);
+        // no return -> 204 No Content
+    }
+
+    [HttpDelete("{id:int}")]
+    public async Task Delete(int id, CancellationToken ct)
+    {
+        await sender.Send(new DeleteDostavljacCommand { Id = id }, ct);
+        // no return -> 204 No Content
+    }
+
+    [HttpGet("{id:int}")]
+    [AllowAnonymous]
+    public async Task<GetDostavljacByIdQueryDto> GetById(int id, CancellationToken ct)
+    {
+        var dto = await sender.Send(new GetDostavljacByIdQuery { Id = id }, ct);
+        return dto; // if NotFoundException -> 404 via middleware
+    }
+
+    [HttpGet]
+    [AllowAnonymous]
+    public async Task<PageResult<ListDostavljaciQueryDto>> List([FromQuery] ListDostavljaciQuery query, CancellationToken ct)
+    {
+        var result = await sender.Send(query, ct);
+        return result;
+    }
+}
+```
+
+**Napomena:** Za Dostavljača **nema** `/enable` i `/disable` endpointa (to ima ProductCategories) — ti endpointi ti ne trebaju.
+
 ---
 
 ### 5.4. Vizuelni tok — Backend
