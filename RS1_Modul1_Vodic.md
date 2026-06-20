@@ -3352,6 +3352,116 @@ Lista se ponovo učita → novi zapis vidljiv
 - Unesi „EXPRESS" → isti rezultat
 - Obriši tekst, Enter → svi zapisi
 
+**Detaljno — šta tačno uraditi (backend + frontend):**
+
+1. **Tok pretrage (cijela slika)**
+   ```
+   Korisnik ukuca "express" + Enter
+        ↓
+   Frontend: searchAction() → request.search = "express", page = 1
+        ↓
+   HTTP GET /Dostavljaci?search=express&paging.page=1&paging.pageSize=10
+        ↓
+   Backend: ListDostavljaciQueryHandler filtrira po Nazivu (case-insensitive)
+        ↓
+   PageResult sa manje zapisa → totalPages se smanji
+        ↓
+   Frontend: handlePageResult() → tabela + paginator se ažuriraju
+   ```
+
+2. **Backend — `ListDostavljaciQuery.cs`**
+   - Mora imati property: `public string? Search { get; init; }`
+   - Nasljeđuje `BasePagedQuery` → automatski ima `Paging`
+
+3. **Backend — `ListDostavljaciQueryHandler.cs` (filter PRIJE paginacije)**
+
+```csharp
+var q = ctx.Dostavljaci.AsNoTracking();
+
+if (!string.IsNullOrWhiteSpace(request.Search))
+{
+    var s = request.Search.Trim().ToLower();
+    q = q.Where(x => x.Naziv.ToLower().Contains(s));
+}
+
+// Tek ONDA paginacija:
+return await PageResult<ListDostavljaciQueryDto>.FromQueryableAsync(projectedQuery, request.Paging, ct);
+```
+
+   - **Case-insensitive:** `.ToLower()` na oba stringa (search i Naziv)
+   - **Prazan search:** `IsNullOrWhiteSpace` → preskoči filter → svi zapisi
+   - **Redoslijed bitan:** filter → sort → projekcija → paginacija
+
+4. **Frontend — `dostavljaci.component.ts`**
+
+```typescript
+searchValue = '';
+
+searchAction(): void {
+  this.request.search = this.searchValue?.trim() || null;
+  this.request.paging.page = 1;  // OBAVEZNO reset!
+  this.loadPagedData();
+}
+
+inputKeyDown(event: KeyboardEvent): void {
+  if (event.key === 'Enter') {
+    this.searchAction();
+  }
+}
+```
+
+   - `|| null` — prazan string postaje `null` → `buildHttpParams` ga **ne šalje** → backend vraća sve
+   - **NE pravi** novi request objekat — koristi `this.request` (paginacija ostaje konzistentna)
+
+5. **Frontend — HTML (search input)**
+
+```html
+<input
+  matInput
+  placeholder="Pretraži dostavljače..."
+  [(ngModel)]="searchValue"
+  (keydown)="inputKeyDown($event)"
+/>
+```
+
+   - `(keydown)` + Enter — pretraga **ne ide** na svaki keystroke, samo na Enter (zahtjev ispita)
+   - `[(ngModel)]="searchValue"` — odvojeno od `request.search` dok korisnik ne pritisne Enter
+
+6. **Kako parametar stiže na backend**
+   - `api.list(this.request)` → `buildHttpParams` pretvara u query string
+   - `{ search: "express", paging: { page: 1, pageSize: 10 } }` → `?search=express&paging.page=1&paging.pageSize=10`
+   - ASP.NET Core mapira `search` → `ListDostavljaciQuery.Search`
+
+7. **Paginacija nakon pretrage**
+   - `handlePageResult(response)` postavlja `totalItems`, `totalPages`
+   - `<app-fit-paginator-bar [vm]="this" />` automatski prikazuje manje stranica
+   - Primjer: 50 zapisa (5 stranica) → pretraga nađe 2 → `totalPages = 1`
+
+8. **Greške koje studenti najčešće prave**
+
+   | Greška | Simptom | Rješenje |
+   |--------|---------|----------|
+   | Filter samo na frontendu | API uvijek vraća sve | Filter u **handleru** |
+   | Nema reset page = 1 | Prazna stranica nakon pretrage | `request.paging.page = 1` |
+   | Case-sensitive | "express" ne nađe "Express" | `.ToLower()` na oba |
+   | Pretraga na svaki keystroke | Previše API poziva | Samo na **Enter** |
+   | Filtrira poslije paginacije | Pogrešni rezultati | Filter **prije** `FromQueryableAsync` |
+
+9. **Test checklist (obavezno prije predaje)**
+
+   - [ ] Unesi `express` + Enter → nađe „Express Dostava"
+   - [ ] Unesi `EXPRESS` + Enter → **isti** rezultat
+   - [ ] Unesi `xyz` + Enter → prazna tabela / no-data slika
+   - [ ] Obriši tekst + Enter → svi zapisi se vrate
+   - [ ] Pretraga sa stranice 3 → paginator pokazuje stranicu 1
+   - [ ] U Network tabu vidiš `search=...` u query stringu
+   - [ ] Swagger: `GET /Dostavljaci?Search=express` vraća filtrirane rezultate
+
+10. **Debug ako ne radi**
+    - **F12 → Network** — da li `search` parametar stiže u URL?
+    - **Swagger** — testiraj List endpoint sa `Search` parametrom
+    - **Backend breakpoint** u handleru — da li `request.Search` ima vrijednost?
+
 ---
 
 ### 7.2. Dodavanje (Funkcionalnost dodavanja)
