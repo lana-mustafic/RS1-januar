@@ -415,12 +415,156 @@ Market.Domain/
 - **Postavi:** ime tabele, max dužina za Kod i Naziv, obavezna polja, **unique index na Kod**
 - **Zašto:** Bez konfiguracije EF ne zna pravila baze (npr. da je Kod max 3 karaktera)
 
+**Detaljno — šta tačno uraditi:**
+
+1. **Gdje kreirati fajl**
+   - Projekt: `Market.Infrastructure` (NE `Market.Domain` — konfiguracija baze ide u Infrastructure sloj)
+   - Putanja: `Database/Configurations/`
+   - Napravi podfolder npr. `Dostavljaci/` (isto kao što `Fakture/` ima `FakturaConfiguration.cs`)
+   - Novi fajl: `DostavljacConfiguration.cs`
+
+2. **Šta kopiraš kao obrazac — otvori dva fajla**
+   - **`ProductCategoryConfiguration.cs`** — osnovna struktura (ime tabele, `IsRequired`, `HasMaxLength`):
+     - Klasa implementira `IEntityTypeConfiguration<ProductCategoryEntity>`
+     - Metoda `Configure(EntityTypeBuilder<...> builder)`
+     - `builder.ToTable("ProductCategories")`
+     - `builder.Property(x => x.Name).IsRequired().HasMaxLength(...)`
+   - **`UserEntityConfiguration.cs`** — za **unique index** (jedinstven email):
+     - `b.HasIndex(x => x.Email).IsUnique();`
+   - **`FakturaConfiguration.cs`** — za **enum property** `Tip`:
+     - `builder.Property(x => x.Tip).IsRequired();`
+
+3. **Struktura klase (logika, ne gotov kod)**
+   - `public class DostavljacConfiguration : IEntityTypeConfiguration<DostavljacEntity>`
+   - Jedna metoda: `public void Configure(EntityTypeBuilder<DostavljacEntity> builder)`
+   - Na vrhu fajla: `using` za entitet i EF (`Microsoft.EntityFrameworkCore`, `Microsoft.EntityFrameworkCore.Metadata.Builders`)
+
+4. **Šta postavljaš unutar `Configure` — redom**
+
+   | Šta konfigurišeš | EF metoda | Zašto |
+   |------------------|-----------|-------|
+   | Ime tabele u bazi | `.ToTable("Dostavljaci")` | Bez ovoga EF može dati drugačije ime tabele |
+   | `Naziv` | `.IsRequired()` + `.HasMaxLength(DostavljacEntity.Constraints.NazivMaxLength)` | Obavezno polje, max dužina iz Constraints |
+   | `Kod` | `.IsRequired()` + `.HasMaxLength(DostavljacEntity.Constraints.KodMaxLength)` | Obavezno, max 3 karaktera |
+   | `Tip` | `.IsRequired()` | Enum mora imati vrijednost (kao kod Fakture) |
+   | `Aktivan` | `.IsRequired()` | Boolean kolona — uvijek mora imati vrijednost |
+   | Jedinstvenost koda | `builder.HasIndex(x => x.Kod).IsUnique()` | Baza ne dozvoljava dva ista koda |
+
+5. **Zašto koristiš `Constraints` iz entiteta?**
+   - U Koraku 2 si stavila `KodMaxLength = 3` i `NazivMaxLength = 100`
+   - Ovdje pišeš: `HasMaxLength(DostavljacEntity.Constraints.KodMaxLength)` — **ne pišeš broj 3 direktno**
+   - Isti broj kasnije ide u validator — jedan izvor istine
+
+6. **Da li moraš ručno registrovati konfiguraciju?**
+   - **NE.** U `DatabaseConfiguration.cs` već postoji:
+     - `modelBuilder.ApplyConfigurationsFromAssembly(typeof(DatabaseContext).Assembly);`
+   - To znači: svaka klasa koja implementira `IEntityTypeConfiguration<T>` u `Market.Infrastructure` se **automatski** učita
+   - Dovoljno je napraviti fajl i buildati — ne dodaješ ništa u `Program.cs`
+
+7. **Šta NE radiš u ovom koraku**
+   - Ne dodaješ `DbSet` — to je Korak 4
+   - Ne pokrećeš migraciju — to je Korak 5
+   - Ne pišeš handler ni validator
+
+8. **Provjera da je korak gotov**
+   - Fajl je u `Market.Infrastructure/Database/Configurations/Dostavljaci/`
+   - Klasa implementira `IEntityTypeConfiguration<DostavljacEntity>`
+   - Ima: `ToTable`, `IsRequired` na svim poljima, `HasMaxLength` na Naziv i Kod, `HasIndex(...).IsUnique()` na Kod
+   - Solution se **builda bez greške**
+
+**Vizuelno — šta dodaješ u Koraku 3:**
+
+```
+Market.Infrastructure/
+└── Database/
+    └── Configurations/
+        └── Dostavljaci/
+            └── DostavljacConfiguration.cs   ← mapiranje entiteta → tabela u bazi
+```
+
+---
+
 #### Korak 4: DbContext i IAppDbContext
 
 - **Otvori:** `DatabaseContext.cs` i `IAppDbContext.cs`
 - **Dodaj:** `DbSet` za tvoj entitet u **oba** fajla
 - **Provjeri:** da su imena konzistentna
 - **Zašto:** Handleri pristupaju bazi preko `IAppDbContext` — ako nema `DbSet`, ne možeš ništa spremiti
+
+**Detaljno — šta tačno uraditi:**
+
+1. **Zašto DVA fajla?**
+   - `DatabaseContext.cs` — **stvarna** implementacija baze (EF Core klasa)
+   - `IAppDbContext.cs` — **interfejs** koji handleri koriste (Application sloj ne smije direktno zavistiti od Infrastructure)
+   - Handler prima `IAppDbContext` u konstruktoru → zove `context.Dostavljaci.Add(...)` itd.
+   - Ako dodaš `DbSet` samo u `DatabaseContext` a zaboraviš interfejs → **build error**
+
+2. **Fajl 1 — `DatabaseContext.cs`**
+   - Putanja: `Market.Infrastructure/Database/DatabaseContext.cs`
+   - Otvori i pogledaj postojeće linije, npr.:
+     ```
+     public DbSet<ProductCategoryEntity> ProductCategories => Set<ProductCategoryEntity>();
+     public DbSet<FakturaEntity> Fakture => Set<FakturaEntity>();
+     ```
+   - Dodaj **jednu novu liniju** u istom stilu:
+     - Tip: `DostavljacEntity`
+     - Ime property-ja: `Dostavljaci` (množina — kao `ProductCategories`, `Fakture`)
+     - Sintaksa: `public DbSet<DostavljacEntity> Dostavljaci => Set<DostavljacEntity>();`
+   - Na vrhu fajla dodaj `using`:
+     - `using Market.Domain.Entities.Dostavljaci;` (ili namespace koji si koristila u Koraku 1/2)
+
+3. **Fajl 2 — `IAppDbContext.cs`**
+   - Putanja: `Market.Application/Abstractions/IAppDbContext.cs`
+   - Otvori i pogledaj postojeće linije, npr.:
+     ```
+     DbSet<ProductCategoryEntity> ProductCategories { get; }
+     DbSet<FakturaEntity> Fakture { get; }
+     ```
+   - Dodaj **jednu novu liniju** — **isto ime** property-ja kao u DatabaseContext:
+     - `DbSet<DostavljacEntity> Dostavljaci { get; }`
+   - Dodaj isti `using` za entitet
+
+4. **Pravilo konzistentnosti imena**
+
+   | Mjesto | Ime koje koristiš | Primjer pristupa u handleru |
+   |--------|-------------------|----------------------------|
+   | `DatabaseContext` | `Dostavljaci` | — |
+   | `IAppDbContext` | `Dostavljaci` | — |
+   | List handler | `ctx.Dostavljaci` | `.AsNoTracking()` |
+   | Create handler | `context.Dostavljaci` | `.Add(entity)` |
+   | Update/Delete | `context.Dostavljaci` | `.FirstOrDefaultAsync(x => x.Id == id)` |
+
+   - Ime property-ja (`Dostavljaci`) mora biti **identično** u oba fajla
+   - Ime tabele u bazi (`"Dostavljaci"` u Koraku 3) i ime `DbSet`-a **mogu** biti ista — to je uobičajeno u ovom projektu
+
+5. **Šta NE radiš u ovom koraku**
+   - Ne mijenjaš `SaveChangesAsync` — već postoji u interfejsu
+   - Ne registruješ DbContext u `Program.cs` — već je registrovan
+   - Još nema tabele u bazi dok ne napraviš migraciju (Korak 5)
+
+6. **Provjera da je korak gotov**
+   - `DatabaseContext.cs` ima `DbSet<DostavljacEntity> Dostavljaci`
+   - `IAppDbContext.cs` ima `DbSet<DostavljacEntity> Dostavljaci { get; }`
+   - Oba fajla imaju `using` za tvoj entitet
+   - Solution se **builda bez greške**
+   - U handlerima (kasnije) možeš pisati `context.Dostavljaci` bez greške
+
+**Vizuelno — šta imaš nakon Koraka 3 i 4:**
+
+```
+Market.Infrastructure/
+└── Database/
+    ├── DatabaseContext.cs          ← + DbSet<DostavljacEntity> Dostavljaci
+    └── Configurations/
+        └── Dostavljaci/
+            └── DostavljacConfiguration.cs
+
+Market.Application/
+└── Abstractions/
+    └── IAppDbContext.cs            ← + DbSet<DostavljacEntity> Dostavljaci { get; }
+```
+
+**Sljedeći korak:** Korak 5 — migracija. Tek nakon `Add-Migration` + `Update-Database` (ili pokretanja API-ja) u SSMS-u ćeš vidjeti tabelu `Dostavljaci` sa kolonama i unique indexom na `Kod`.
 
 #### Korak 5: Migracija baze
 
