@@ -3117,6 +3117,167 @@ this.form = this.fb.group({
   5. Ponovo učitaj listu
 - **Poruka modala:** „Da li ste sigurni da želite obrisati {{naziv}}?"
 
+**Detaljno — šta tačno uraditi:**
+
+1. **Gdje implementiraš brisanje**
+   - U **listi**: `dostavljaci.component.ts` (Korak 2)
+   - U **HTML**: dugme kante u koloni Akcije → `(click)="deleteAction(item)"`
+   - Brisanje **ne ide** u Add/Edit komponentu — samo u listu
+
+2. **Uzorak — `products.component.ts` → `onDelete`**
+   - Otvara modal **prije** brisanja
+   - Tek ako korisnik potvrdi → poziva API
+   - Nakon uspjeha → osvježi listu
+
+3. **Dva načina za dialog**
+
+   **Način A — generički (dovoljno na ispitu):**
+   ```typescript
+   this.dialogHelper.confirmDelete(item.naziv).subscribe(...)
+   ```
+   - Koristi postojeću metodu u `DialogHelperService`
+   - Poruka iz i18n: `DIALOGS.MESSAGES.DELETE_CONFIRM` → *„Da li ste sigurni da želite obrisati "{{name}}"?"*
+
+   **Način B — posebna sekcija (kao Products):**
+   ```typescript
+   this.dialogHelper.dostavljac.confirmDelete(item.naziv)
+   ```
+   - Zahtijeva dodavanje `dostavljac = { confirmDelete: ... }` u `dialog-helper.service.ts`
+   - Na ispitu **nije obavezno** — Način A je dovoljan
+
+4. **Logika korak po korak**
+
+   ```
+   Klik na ikonicu kante
+        ↓
+   deleteAction(item)
+        ↓
+   dialogHelper.confirmDelete(item.naziv)
+        ↓
+   Modal: "Da li ste sigurni da želite obrisati Express Dostava?"
+        ↓
+   ┌─ OTKAŽI → ništa se ne dešava
+   └─ OBRIŠI → performDelete(item)
+              ↓
+              api.delete(item.id)
+              ↓
+              toast success + loadPagedData()
+   ```
+
+5. **Provjera DELETE dugmeta**
+   ```typescript
+   if (result && result.button === DialogButton.DELETE) {
+     this.performDelete(item);
+   }
+   ```
+   - **Bez ove provjere** — brisanje bi išlo i na Cancel
+   - Import: `DialogButton` iz `dialog-config.model`
+
+6. **`performDelete` — API poziv**
+   - `startLoading()`
+   - `api.delete(item.id).subscribe(...)`
+   - Success: `toaster.success(...)`, `loadPagedData()` (NE `ngOnInit()`)
+   - Error: `toaster.error(...)`, `stopLoading()`
+
+7. **HTML — dugme u tabeli (Korak 3)**
+   ```html
+   <button mat-icon-button color="warn" (click)="deleteAction(item)" matTooltip="Obriši">
+     <mat-icon>delete</mat-icon>
+   </button>
+   ```
+
+8. **Backend — soft delete**
+   - API `DELETE /Dostavljaci/{id}` postavlja `IsDeleted = true`
+   - Zapis nestaje iz liste, ali ostaje u bazi (SSMS: `IsDeleted = 1`)
+
+9. **Provjera da je korak gotov**
+   - Klik kante → modal se pojavi
+   - Cancel → ništa se ne briše
+   - Obriši → toast + zapis nestane iz tabele
+   - Paginacija se ažurira (`totalItems` se smanji)
+
+**Primjer koda — `dostavljaci.component.ts` (delete dio):**
+
+```typescript
+import { DialogHelperService } from '../../../shared/services/dialog-helper.service';
+import { DialogButton } from '../../../shared/models/dialog-config.model';
+
+// u klasi:
+private dialogHelper = inject(DialogHelperService);
+
+deleteAction(item: ListDostavljaciQueryDto): void {
+  this.dialogHelper.confirmDelete(item.naziv).subscribe((result) => {
+    if (result && result.button === DialogButton.DELETE) {
+      this.performDelete(item);
+    }
+  });
+}
+
+private performDelete(item: ListDostavljaciQueryDto): void {
+  this.startLoading();
+
+  this.api.delete(item.id).subscribe({
+    next: () => {
+      this.toaster.success(`Dostavljač "${item.naziv}" uspješno obrisan.`);
+      this.loadPagedData();
+    },
+    error: (err) => {
+      this.stopLoading();
+      this.toaster.error(err?.message ?? 'Greška pri brisanju.');
+      console.error('Delete dostavljac error:', err);
+    },
+  });
+}
+```
+
+**Opcionalno — sekcija u `dialog-helper.service.ts` (Način B):**
+
+```typescript
+dostavljac = {
+  confirmDelete: (naziv: string) => {
+    return this.confirmDelete(
+      naziv,
+      'DOSTAVLJACI.DIALOGS.DELETE_MESSAGE'  // ako dodaš u bs.json/en.json
+    );
+  },
+
+  showDeleteSuccess: () => {
+    return this.showSuccess(
+      'DIALOGS.TITLES.SUCCESS',
+      'DOSTAVLJACI.DIALOGS.SUCCESS_DELETE'
+    );
+  },
+};
+```
+
+**Poruka modala (već postoji u projektu):**
+
+U `public/i18n/bs.json`:
+```json
+"DELETE_CONFIRM": "Da li ste sigurni da želite obrisati \"{{name}}\"?"
+```
+
+`confirmDelete(item.naziv)` automatski ubacuje naziv umjesto `{{name}}`.
+
+**Vizuelni tok:**
+
+```
+Tabela → klik 🗑️ na redu "Express Dostava"
+   ↓
+Modal: Da li ste sigurni da želite obrisati "Express Dostava"?
+   ↓
+[Otkaži] → modal se zatvara
+[Obriši] → DELETE /Dostavljaci/5
+   ↓
+Toast: "Dostavljač uspješno obrisan."
+   ↓
+loadPagedData() → tabela bez obrisanog reda
+```
+
+**Sljedeći korak:** Korak 10 — provjeri routing i Korak 11 — testiraj cijeli tok.
+
+---
+
 #### Korak 10: Routing i navigacija
 
 - **Provjeri** da u `admin-routing-module.ts` postoje rute:
