@@ -1653,6 +1653,8 @@ src/app/api-services/
 
 ---
 
+#### Korak 2: Komponenta liste — TypeScript
+
 - **Otvori:** `product-categories-2.component.ts` i `products.component.ts`
 - **Naslijedi:** `BaseListPagedComponent<TItem, TRequest>`
 - **Implementiraj:** `loadPagedData()` — poziva API i puni `this.items`
@@ -1663,6 +1665,219 @@ src/app/api-services/
   - `inputKeyDown(event)` → ako Enter, pokreni pretragu
   - `searchAction()` → postavi search u request, resetuj page na 1, učitaj podatke
 - **Zašto BaseListPagedComponent:** Već ima `goToPage`, `totalItems`, `totalPages` — ne pišeš paginaciju od nule
+
+**Detaljno — šta tačno uraditi:**
+
+1. **Gdje pišeš kod**
+   - Fajl: `src/app/modules/admin/catalogs/dostavljaci/dostavljaci.component.ts`
+   - Starter je **prazan** — samo `@Component` dekorator, nema logike
+   - Komponenta je **već registrovana** u `admin-module.ts` i ruti `dostavljaci`
+
+2. **Uzorci koje otvoriš**
+   - **`product-categories-2.component.ts`** — lista sa pretragom, `BaseListPagedComponent`, `searchValue`, `inputKeyDown`, `editAction` sa relativnom rutom
+   - **`products.component.ts`** — čistiji `loadPagedData`, `onDelete` sa dialogom, `onCreate` navigacija
+
+3. **Naslijeđivanje — generici**
+   ```typescript
+   extends BaseListPagedComponent<ListDostavljaciQueryDto, ListDostavljaciRequest>
+   ```
+   - `TItem` = jedan red u tabeli (`ListDostavljaciQueryDto`)
+   - `TRequest` = request za listu (`ListDostavljaciRequest`)
+
+4. **Dependency injection — šta ti treba**
+   - `DostavljaciApiService` — API pozivi
+   - `Router` + `ActivatedRoute` — navigacija na add/edit
+   - `ToasterService` — toast poruke
+   - `DialogHelperService` — modal prije brisanja
+
+5. **Constructor — inicijalizacija requesta**
+   ```typescript
+   constructor() {
+     super();
+     this.request = new ListDostavljaciRequest();
+   }
+   ```
+   - `this.request` dolazi iz `BaseListPagedComponent`
+   - Paging default (`page=1`, `pageSize=10`) postavlja `PageRequest` unutra
+
+6. **`ngOnInit` — učitaj listu**
+   ```typescript
+   ngOnInit(): void {
+     this.initList(); // poziva loadPagedData()
+   }
+   ```
+
+7. **`loadPagedData()` — srce liste**
+   - Pozovi `this.api.list(this.request)`
+   - U `next`: `this.handlePageResult(response)` — puni `items`, `totalItems`, `totalPages`
+   - U `error`: `toaster.error(...)` + `stopLoading()`
+   - **Uvijek** koristi `this.request` — ne pravi novi objekat u `searchAction` (to je greška u product-categories-2 primjeru)
+
+8. **`searchAction()` — ispravan obrazac**
+   ```typescript
+   this.request.search = this.searchValue?.trim() || null;
+   this.request.paging.page = 1;  // reset stranice!
+   this.loadPagedData();
+   ```
+   - Prazan search → `null` → backend vraća sve zapise
+   - Page mora na 1 jer se broj rezultata mijenja
+
+9. **`inputKeyDown(event)` — pretraga na Enter**
+   ```typescript
+   if (event.key === 'Enter') {
+     this.searchAction();
+   }
+   ```
+
+10. **Navigacija**
+    - `onCreate()` → `this.router.navigate(['add'], { relativeTo: this.route })`
+    - `editAction(x)` → `this.router.navigate(['edit', x.id], { relativeTo: this.route })`
+    - Rute `add` i `edit/:id` dodaješ u Koraku 10 — ali navigacija ide već ovdje
+
+11. **`deleteAction(x)` — modal + brisanje**
+    - `dialogHelper.confirmDelete(x.naziv)` — generički dialog
+    - Provjeri `result.button === DialogButton.DELETE`
+    - Pozovi `api.delete(x.id)`
+    - Toast success/error
+    - Ponovo učitaj listu: `this.loadPagedData()`
+
+12. **`displayedColumns` — za mat-table (HTML korak)**
+    ```typescript
+    displayedColumns = ['naziv', 'kod', 'tip', 'aktivan', 'actions'];
+    ```
+
+13. **Provjera da je korak gotov**
+    - Komponenta nasljeđuje `BaseListPagedComponent`
+    - `loadPagedData()` poziva `DostavljaciApiService.list(this.request)`
+    - Pretraga radi na Enter
+    - Dugmad za create/edit/delete imaju metode
+    - Nema crvenih grešaka u TS fajlu
+
+**Primjer koda (ispravno) — `dostavljaci.component.ts`:**
+
+```typescript
+import { Component, inject, OnInit } from '@angular/core';
+import { ActivatedRoute, Router } from '@angular/router';
+import { BaseListPagedComponent } from '../../../../core/components/base-classes/base-list-paged-component';
+import { DostavljaciApiService } from '../../../../api-services/dostavljaci/dostavljaci-api.service';
+import {
+  ListDostavljaciQueryDto,
+  ListDostavljaciRequest,
+} from '../../../../api-services/dostavljaci/dostavljaci-api.model';
+import { ToasterService } from '../../../../core/services/toaster.service';
+import { DialogHelperService } from '../../../shared/services/dialog-helper.service';
+import { DialogButton } from '../../../shared/models/dialog-config.model';
+
+@Component({
+  selector: 'app-dostavljaci',
+  standalone: false,
+  templateUrl: './dostavljaci.component.html',
+  styleUrl: './dostavljaci.component.scss',
+})
+export class DostavljaciComponent
+  extends BaseListPagedComponent<ListDostavljaciQueryDto, ListDostavljaciRequest>
+  implements OnInit
+{
+  private api = inject(DostavljaciApiService);
+  private router = inject(Router);
+  private route = inject(ActivatedRoute);
+  private toaster = inject(ToasterService);
+  private dialogHelper = inject(DialogHelperService);
+
+  searchValue = '';
+
+  displayedColumns: string[] = ['naziv', 'kod', 'tip', 'aktivan', 'actions'];
+
+  constructor() {
+    super();
+    this.request = new ListDostavljaciRequest();
+  }
+
+  ngOnInit(): void {
+    this.initList();
+  }
+
+  protected override loadPagedData(): void {
+    this.startLoading();
+
+    this.api.list(this.request).subscribe({
+      next: (response) => {
+        this.handlePageResult(response);
+        this.stopLoading();
+      },
+      error: (err) => {
+        this.stopLoading();
+        this.toaster.error(err?.message ?? 'Greška pri učitavanju dostavljača.');
+        console.error('Load dostavljaci error:', err);
+      },
+    });
+  }
+
+  onCreate(): void {
+    this.router.navigate(['add'], { relativeTo: this.route });
+  }
+
+  editAction(item: ListDostavljaciQueryDto): void {
+    this.router.navigate(['edit', item.id], { relativeTo: this.route });
+  }
+
+  deleteAction(item: ListDostavljaciQueryDto): void {
+    this.dialogHelper.confirmDelete(item.naziv).subscribe((result) => {
+      if (result && result.button === DialogButton.DELETE) {
+        this.performDelete(item);
+      }
+    });
+  }
+
+  private performDelete(item: ListDostavljaciQueryDto): void {
+    this.startLoading();
+
+    this.api.delete(item.id).subscribe({
+      next: () => {
+        this.toaster.success(`Dostavljač "${item.naziv}" uspješno obrisan.`);
+        this.loadPagedData();
+      },
+      error: (err) => {
+        this.stopLoading();
+        this.toaster.error(err?.message ?? 'Greška pri brisanju.');
+        console.error('Delete dostavljac error:', err);
+      },
+    });
+  }
+
+  searchAction(): void {
+    this.request.search = this.searchValue?.trim() || null;
+    this.request.paging.page = 1;
+    this.loadPagedData();
+  }
+
+  inputKeyDown(event: KeyboardEvent): void {
+    if (event.key === 'Enter') {
+      this.searchAction();
+    }
+  }
+}
+```
+
+**Vizuelno — tok podataka u Koraku 2:**
+
+```
+ngOnInit()
+   ↓
+initList() → loadPagedData()
+   ↓
+DostavljaciApiService.list(this.request)
+   ↓
+HTTP GET /Dostavljaci?paging.page=1&paging.pageSize=10&search=...
+   ↓
+handlePageResult(response) → this.items = response.items
+   ↓
+HTML (Korak 3) prikazuje this.items u mat-table
+```
+
+**Sljedeći korak:** Korak 3 — HTML (`dostavljaci.component.html`) povezuje search input, tabelu i paginator sa ovim metodama.
+
+---
 
 #### Korak 3: Komponenta liste — HTML
 
