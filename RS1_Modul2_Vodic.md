@@ -14,6 +14,9 @@
 4. [Kako pravilno pročitati zadatak](#4-kako-pravilno-pročitati-zadatak)
 5. [Zadatak 2 — Upravljanje fakturama (pregled)](#5-zadatak-2--upravljanje-fakturama-pregled)
 6. [Dio A — Lista faktura (Read + paginacija)](#6-dio-a--lista-faktura-read--paginacija)
+   - [6.4 Praktični vodič — uradi sama](#64-praktični-vodič--uradi-sama-korak-po-korak)
+   - [6.5 Referentno rješenje](#65-referentno-rješenje--usporedi-sa-svojim-kodom)
+   - [6.6 Checklista provjere](#66-checklista--jesam-li-ispravno-uradila)
 7. [Dio B — Backend: entiteti, veze, Create](#7-dio-b--backend-entiteti-veze-create)
 8. [Dio C — Poslovna logika (ulazna / izlazna)](#8-dio-c--poslovna-logika-ulazna--izlazna)
 9. [Dio D — Frontend: forma sa stavkama (FormArray)](#9-dio-d--frontend-forma-sa-stavkama-formarray)
@@ -734,6 +737,641 @@ nextPage() → paging.page++ → loadPagedData() → nova stranica
 | `fakture-api.service.ts` | **Zamijeni** `list()` sa `buildHttpParams` |
 | `fakture.component.ts` | **Refaktoriši** na `BaseListPagedComponent` |
 | `fakture.component.html` | **Zamijeni** `fakture` → `items`, dodaj paginator |
+
+---
+
+### 6.4. Praktični vodič — uradi sama, korak po korak
+
+> **Cilj:** Popraviti paginaciju na listi faktura (Koraci 4–6).  
+> **Mijenjaš 4 fajla** na frontendu. Backend **ne diraš**.  
+> **Na kraju:** Usporedi svoje fajlove sa „Referentnim rješenjem" u sekciji 6.5.
+
+#### Prije nego počneš
+
+1. Pokreni **backend** (`Market.API`) i **frontend** (`ng serve`)
+2. Uloguj se u aplikaciju
+3. Otvori u VS Code-u folder: `rs1-frontend-2025-26/src/app/`
+4. Pripremi ove fajlove u editoru (otvori sve odjednom):
+
+| # | Putanja |
+|---|---------|
+| 1 | `api-services/fakture/fakture-api.models.ts` |
+| 2 | `api-services/fakture/fakture-api.service.ts` |
+| 3 | `modules/admin/catalogs/fakture/fakture.component.ts` |
+| 4 | `modules/admin/catalogs/fakture/fakture.component.html` |
+
+**Redoslijed rada:** prvo models → servis → komponenta TS → komponenta HTML.  
+Zašto ovim redom? Servis koristi `ListFaktureRequest` iz models; komponenta koristi servis.
+
+---
+
+#### KORAK 4 — Popravi API servis
+
+##### 4.1. Otvori `fakture-api.models.ts`
+
+**Šta template ima (STARO):** samo `ListFaktureQueryDto` i `ListFaktureResponse` — **nema** `ListFaktureRequest`.
+
+**Šta radiš:**
+
+1. Na vrh fajla, ispod importa za `PageResult`, **dodaj** import:
+   ```typescript
+   import { BasePagedQuery } from '../../core/models/paging/base-paged-query';
+   ```
+
+2. U sekciji `// === QUERIES (READ) ===`, **prije** `ListFaktureQueryDto`, **dodaj** klasu:
+   ```typescript
+   /**
+    * Query parameters for GET /Fakture
+    * Corresponds to: ListFaktureQuery.cs
+    */
+   export class ListFaktureRequest extends BasePagedQuery {}
+   ```
+
+3. Sačuvaj fajl (`Ctrl+S`).
+
+**Provjera odmah:** U fajlu mora postojati riječ `ListFaktureRequest` i `extends BasePagedQuery`.
+
+---
+
+##### 4.2. Otvori `fakture-api.service.ts`
+
+**Šta template ima (STARO) — ovo brišeš:**
+
+```typescript
+import { HttpClient, HttpParams } from '@angular/common/http';
+// ...
+list(pageNumber: number = 1, pageSize: number = 10): Observable<ListFaktureResponse> {
+  const params = new HttpParams()
+    .set('Paging.PageNumber', pageNumber.toString())
+    .set('Paging.PageSize', pageSize.toString());
+
+  return this.http.get<ListFaktureResponse>(this.baseUrl, { params });
+}
+```
+
+**Šta radiš — korak po korak:**
+
+1. **Import:** Ukloni `HttpParams` iz `@angular/common/http` (ostaje samo `HttpClient`).
+
+2. **Import:** Zamijeni import iz models — umjesto samo `ListFaktureResponse`, uvezi i `ListFaktureRequest`:
+   ```typescript
+   import { ListFaktureRequest, ListFaktureResponse } from './fakture-api.models';
+   ```
+
+3. **Import:** Dodaj:
+   ```typescript
+   import { buildHttpParams } from '../../core/models/build-http-params';
+   ```
+
+4. **Metoda `list`:** Obriši staru metodu sa `pageNumber` / `PageNumber` i **zamijeni** ovom:
+   ```typescript
+   list(request?: ListFaktureRequest): Observable<ListFaktureResponse> {
+     const params = request ? buildHttpParams(request as any) : undefined;
+
+     return this.http.get<ListFaktureResponse>(this.baseUrl, { params });
+   }
+   ```
+
+5. Sačuvaj fajl.
+
+**Provjera odmah:**
+
+| U fajlu MORA biti | U fajlu NE SMIJE biti |
+|-------------------|----------------------|
+| `buildHttpParams` | `HttpParams` |
+| `ListFaktureRequest` | `PageNumber` |
+| `list(request?:` | `list(pageNumber:` |
+
+---
+
+##### 4.3. Brza provjera Koraka 4 (opciono, ali korisno)
+
+1. Sačuvaj oba fajla
+2. U terminalu frontend projekta: `ng build` ili samo pogledaj da nema crvenih grešaka u VS Code-u
+3. Ako `fakture.component.ts` još nisi dirala — **normalno je** da ima grešku tipa „Expected 0-1 arguments, but got 2" na `list(1, 10)` — to popravljaš u Koraku 5
+
+---
+
+#### KORAK 5 — Refaktoriši `FaktureComponent` (TypeScript)
+
+##### 5.1. Otvori `fakture.component.ts`
+
+Radi **od vrha prema dnu** fajla. Nemoj kopirati naslijepo — razumij šta mijenjaš.
+
+---
+
+##### 5.2. Dodaj nove importe
+
+**Dodaj** ove linije (pored postojećih importa):
+
+```typescript
+import { BaseListPagedComponent } from '../../../../core/components/base-classes/base-list-paged-component';
+import { ListFaktureRequest } from '../../../../api-services/fakture/fakture-api.models';
+import { ToasterService } from '../../../../core/services/toaster.service';
+```
+
+**Napomena:** `ListFaktureQueryDto` i `FakturaTip` već importuješ — samo **dodaj** `ListFaktureRequest` u isti import iz models.
+
+---
+
+##### 5.3. Promijeni deklaraciju klase
+
+**STARO:**
+```typescript
+export class FaktureComponent implements OnInit {
+```
+
+**NOVO:**
+```typescript
+export class FaktureComponent
+  extends BaseListPagedComponent<ListFaktureQueryDto, ListFaktureRequest>
+  implements OnInit
+{
+```
+
+---
+
+##### 5.4. Promijeni dependency injection
+
+**STARO:**
+```typescript
+  private router = inject(Router);
+  private faktureApiService = inject(FaktureApiService);
+
+  fakture: ListFaktureQueryDto[] = [];
+  displayedColumns: string[] = [...];
+```
+
+**NOVO:**
+```typescript
+  private api = inject(FaktureApiService);
+  private router = inject(Router);
+  private toaster = inject(ToasterService);
+
+  displayedColumns: string[] = ['brojRacuna', 'tip', 'datumKreiranja', 'brojStavki'];
+```
+
+**Objašnjenje:**
+- `fakture` polje **brišeš** — podatke drži `items` iz `BaseListPagedComponent`
+- `faktureApiService` preimenuješ u `api` (konvencija projekta, kao u `products.component.ts`)
+
+---
+
+##### 5.5. Dodaj constructor
+
+**Dodaj** između polja i `ngOnInit`:
+
+```typescript
+  constructor() {
+    super();
+    this.request = new ListFaktureRequest();
+  }
+```
+
+**Zašto `super()`?** Poziva konstruktor roditeljske klase `BaseListPagedComponent`.
+
+---
+
+##### 5.6. Promijeni `ngOnInit`
+
+**STARO:**
+```typescript
+  ngOnInit(): void {
+    this.loadFakture();
+  }
+```
+
+**NOVO:**
+```typescript
+  ngOnInit(): void {
+    this.initList();
+  }
+```
+
+---
+
+##### 5.7. Zamijeni `loadFakture()` sa `loadPagedData()`
+
+**Obriši cijelu** metodu `loadFakture()` i **dodaj**:
+
+```typescript
+  protected override loadPagedData(): void {
+    this.startLoading();
+
+    this.api.list(this.request).subscribe({
+      next: (response) => {
+        this.handlePageResult(response);
+        this.stopLoading();
+      },
+      error: (err) => {
+        this.stopLoading();
+        this.toaster.error(err?.message ?? 'Greška pri učitavanju faktura.');
+        console.error('Load fakture error:', err);
+      },
+    });
+  }
+```
+
+**Objašnjenje svake linije:**
+
+| Linija | Šta radi |
+|--------|----------|
+| `protected override loadPagedData()` | Base klasa traži ovu metodu — override = tvoja implementacija |
+| `this.startLoading()` | Prikazuje loading stanje (iz `BaseComponent`) |
+| `this.api.list(this.request)` | Šalje `Paging.Page` i `Paging.PageSize` iz requesta |
+| `this.handlePageResult(response)` | Puní `this.items`, `totalItems`, `totalPages` |
+| `this.stopLoading()` | Gasí loading |
+| `this.toaster.error(...)` | Korisnik vidi poruku ako API padne |
+
+---
+
+##### 5.8. Ostale metode — NE DIRAJ
+
+Ove metode **ostavljaju se iste** kao u templateu:
+- `onNovaFaktura()`
+- `getTipString()`
+- `getTipClass()`
+
+---
+
+##### 5.9. Sačuvaj `fakture.component.ts`
+
+**Provjera odmah:**
+
+| U fajlu MORA biti | U fajlu NE SMIJE biti |
+|-------------------|----------------------|
+| `extends BaseListPagedComponent` | `fakture: ListFaktureQueryDto[]` |
+| `loadPagedData` | `loadFakture` |
+| `this.initList()` | `this.loadFakture()` |
+| `this.api.list(this.request)` | `list(1, 10)` |
+| `handlePageResult` | — |
+| `constructor() { super();` | — |
+
+---
+
+#### KORAK 6 — Ažuriraj HTML i provjeri kolone
+
+##### 6.1. Otvori `fakture.component.html`
+
+Mijenjaš **samo 2 stvari**. Kolone **ne diraš**.
+
+---
+
+##### 6.2. Promijeni `[dataSource]` na tabeli
+
+**STARO (linija ~28):**
+```html
+<table mat-table [dataSource]="fakture">
+```
+
+**NOVO:**
+```html
+<table mat-table [dataSource]="items">
+```
+
+**Zašto:** `items` dolazi iz `BaseListPagedComponent` — tamo `handlePageResult` puni podatke.
+
+---
+
+##### 6.3. Zamijeni statički footer sa paginatorom
+
+**OBRIŠI** cijeli ovaj blok (linije ~67–73):
+
+```html
+    <!-- Footer info -->
+    <div class="table-footer">
+      <div class="footer-info">
+        <mat-icon>info</mat-icon>
+        <span>Stranica 1 od 1 · Ukupno: {{ fakture.length }} zapisa</span>
+      </div>
+    </div>
+```
+
+**UMJESTO NJEGA**, odmah ispod `</table>`, **dodaj**:
+
+```html
+    <app-fit-paginator-bar [vm]="this" />
+```
+
+---
+
+##### 6.4. Provjeri kolone — šta MORA ostati
+
+U HTML-u **ne smiješ** dodati kolonu `actions` (edit/delete).  
+Ove 4 kolone **već postoje** — samo provjeri da nisi slučajno obrisala:
+
+| Kolona | `matColumnDef` | Šta prikazuje |
+|--------|----------------|---------------|
+| Broj računa | `brojRacuna` | `{{ faktura.brojRacuna }}` |
+| Tip | `tip` | badge sa `getTipString` / `getTipClass` |
+| Datum kreiranja | `datumKreiranja` | `{{ faktura.datumKreiranja \| date }}` |
+| Broj stavki | `brojStavki` | `{{ faktura.brojStavki }}` |
+
+U `fakture.component.ts`, `displayedColumns` mora biti:
+```typescript
+['brojRacuna', 'tip', 'datumKreiranja', 'brojStavki']
+```
+**Bez** `'actions'`.
+
+---
+
+##### 6.5. Sačuvaj HTML i pokreni aplikaciju
+
+1. Sačuvaj fajl
+2. Otvori browser: `http://localhost:4200/admin/fakture`
+3. Trebaš vidjeti tabelu + paginator ispod (ako ima faktura u bazi)
+
+---
+
+### 6.5. Referentno rješenje — usporedi sa svojim kodom
+
+> **Kako koristiti:** Nakon što završiš Korake 4–6, otvori svaki fajl i **usporedi** sa kodom ispod.  
+> Ako se poklapa — uradila si ispravno. Ako nešto fali ili je drugačije — popravi prije testiranja.
+
+---
+
+#### ✅ Referenca: `fakture-api.models.ts` (cijeli fajl)
+
+```typescript
+import { PageResult } from '../../core/models/paging/page-result';
+import { BasePagedQuery } from '../../core/models/paging/base-paged-query';
+
+// === ENUMS ===
+
+/**
+ * Tip fakture enum
+ * Corresponds to: FakturaTip.cs
+ */
+export enum FakturaTip {
+  /** Ulazna faktura - unos robe / povećanje zaliha */
+  Ulazna = 1,
+  /** Izlazna faktura - iznos robe / smanjenje zaliha */
+  Izlazna = 2
+}
+
+// === QUERIES (READ) ===
+
+/**
+ * Query parameters for GET /Fakture
+ * Corresponds to: ListFaktureQuery.cs
+ */
+export class ListFaktureRequest extends BasePagedQuery {}
+
+/**
+ * Response item for GET /Fakture
+ * Corresponds to: ListFaktureQueryDto.cs
+ */
+export interface ListFaktureQueryDto {
+  id: number;
+  brojRacuna: string;
+  tip: FakturaTip;
+  datumKreiranja: string; // ISO date string
+  brojStavki: number;
+}
+
+/**
+ * Paged response for GET /Fakture
+ */
+export type ListFaktureResponse = PageResult<ListFaktureQueryDto>;
+```
+
+---
+
+#### ✅ Referenca: `fakture-api.service.ts` (cijeli fajl)
+
+```typescript
+import { inject, Injectable } from '@angular/core';
+import { HttpClient } from '@angular/common/http';
+import { Observable } from 'rxjs';
+import { environment } from '../../../environments/environment';
+import { ListFaktureRequest, ListFaktureResponse } from './fakture-api.models';
+import { buildHttpParams } from '../../core/models/build-http-params';
+
+@Injectable({
+  providedIn: 'root'
+})
+export class FaktureApiService {
+  private readonly baseUrl = `${environment.apiUrl}/Fakture`;
+  private http = inject(HttpClient);
+
+  /**
+   * GET /Fakture
+   * List fakture with pagination.
+   */
+  list(request?: ListFaktureRequest): Observable<ListFaktureResponse> {
+    const params = request ? buildHttpParams(request as any) : undefined;
+
+    return this.http.get<ListFaktureResponse>(this.baseUrl, { params });
+  }
+}
+```
+
+---
+
+#### ✅ Referenca: `fakture.component.ts` (cijeli fajl)
+
+```typescript
+import { Component, inject, OnInit } from '@angular/core';
+import { Router } from '@angular/router';
+import { BaseListPagedComponent } from '../../../../core/components/base-classes/base-list-paged-component';
+import { FaktureApiService } from '../../../../api-services/fakture/fakture-api.service';
+import {
+  ListFaktureQueryDto,
+  ListFaktureRequest,
+  FakturaTip,
+} from '../../../../api-services/fakture/fakture-api.models';
+import { ToasterService } from '../../../../core/services/toaster.service';
+
+@Component({
+  selector: 'app-fakture',
+  standalone: false,
+  templateUrl: './fakture.component.html',
+  styleUrl: './fakture.component.scss',
+})
+export class FaktureComponent
+  extends BaseListPagedComponent<ListFaktureQueryDto, ListFaktureRequest>
+  implements OnInit
+{
+  private api = inject(FaktureApiService);
+  private router = inject(Router);
+  private toaster = inject(ToasterService);
+
+  displayedColumns: string[] = ['brojRacuna', 'tip', 'datumKreiranja', 'brojStavki'];
+
+  constructor() {
+    super();
+    this.request = new ListFaktureRequest();
+  }
+
+  ngOnInit(): void {
+    this.initList();
+  }
+
+  protected override loadPagedData(): void {
+    this.startLoading();
+
+    this.api.list(this.request).subscribe({
+      next: (response) => {
+        this.handlePageResult(response);
+        this.stopLoading();
+      },
+      error: (err) => {
+        this.stopLoading();
+        this.toaster.error(err?.message ?? 'Greška pri učitavanju faktura.');
+        console.error('Load fakture error:', err);
+      },
+    });
+  }
+
+  onNovaFaktura(): void {
+    this.router.navigate(['/admin/fakture/add']);
+  }
+
+  getTipString(tip: FakturaTip): string {
+    return tip === FakturaTip.Ulazna ? 'ULAZNA' : 'IZLAZNA';
+  }
+
+  getTipClass(tip: FakturaTip): string {
+    return tip === FakturaTip.Ulazna ? 'ulazna' : 'izlazna';
+  }
+}
+```
+
+---
+
+#### ✅ Referenca: `fakture.component.html` (cijeli fajl)
+
+```html
+<div class="container">
+  <!-- Header Card -->
+  <div class="header-card">
+    <div class="header-card-content">
+      <div class="title-section">
+        <div class="title-icon">
+          <mat-icon>receipt_long</mat-icon>
+        </div>
+        <h1>Fakture</h1>
+      </div>
+
+      <div class="actions-container">
+        <button mat-raised-button color="primary" (click)="onNovaFaktura()">
+          <mat-icon>add</mat-icon>
+          Nova faktura
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <div class="info-card">
+    <mat-icon>info</mat-icon>
+    <span>Ovdje raditi ispitni zadatak - drugi modul</span>
+  </div>
+
+  <!-- Table -->
+  <div class="table-card">
+    <table mat-table [dataSource]="items">
+      <!-- Broj računa -->
+      <ng-container matColumnDef="brojRacuna">
+        <th mat-header-cell *matHeaderCellDef>BROJ RAČUNA</th>
+        <td mat-cell *matCellDef="let faktura">
+          <span class="broj-racuna">{{ faktura.brojRacuna }}</span>
+        </td>
+      </ng-container>
+
+      <!-- Tip -->
+      <ng-container matColumnDef="tip">
+        <th mat-header-cell *matHeaderCellDef>TIP</th>
+        <td mat-cell *matCellDef="let faktura">
+          <span class="tip-badge" [ngClass]="getTipClass(faktura.tip)">
+            {{ getTipString(faktura.tip) }}
+          </span>
+        </td>
+      </ng-container>
+
+      <!-- Datum kreiranja -->
+      <ng-container matColumnDef="datumKreiranja">
+        <th mat-header-cell *matHeaderCellDef>DATUM KREIRANJA</th>
+        <td mat-cell *matCellDef="let faktura">
+          {{ faktura.datumKreiranja | date }}
+        </td>
+      </ng-container>
+
+      <!-- Broj stavki -->
+      <ng-container matColumnDef="brojStavki">
+        <th mat-header-cell *matHeaderCellDef>BROJ STAVKI</th>
+        <td mat-cell *matCellDef="let faktura" class="broj-stavki-cell">
+          {{ faktura.brojStavki }}
+        </td>
+      </ng-container>
+
+      <tr mat-header-row *matHeaderRowDef="displayedColumns"></tr>
+      <tr mat-row *matRowDef="let row; columns: displayedColumns"></tr>
+    </table>
+
+    <app-fit-paginator-bar [vm]="this" />
+  </div>
+</div>
+```
+
+---
+
+### 6.6. Checklista — jesam li ispravno uradila?
+
+Prođi red po red. Svaki red mora biti ✅ prije nego kažeš da je gotovo.
+
+#### Fajl 1: `fakture-api.models.ts`
+
+- [ ] Postoji `import { BasePagedQuery } from '../../core/models/paging/base-paged-query'`
+- [ ] Postoji `export class ListFaktureRequest extends BasePagedQuery {}`
+- [ ] `ListFaktureQueryDto` i `FakturaTip` su i dalje tu (nisi slučajno obrisala)
+
+#### Fajl 2: `fakture-api.service.ts`
+
+- [ ] Nema riječi `PageNumber` nigdje u fajlu
+- [ ] Nema `HttpParams` importa
+- [ ] Postoji `import { buildHttpParams } from '../../core/models/build-http-params'`
+- [ ] Metoda je `list(request?: ListFaktureRequest)` — ne `list(pageNumber, pageSize)`
+- [ ] Unutar metode: `buildHttpParams(request as any)`
+
+#### Fajl 3: `fakture.component.ts`
+
+- [ ] Klasa `extends BaseListPagedComponent<ListFaktureQueryDto, ListFaktureRequest>`
+- [ ] Nema polja `fakture: ListFaktureQueryDto[]`
+- [ ] Postoji `constructor() { super(); this.request = new ListFaktureRequest(); }`
+- [ ] `ngOnInit` poziva `this.initList()` — ne `loadFakture()`
+- [ ] Postoji `protected override loadPagedData()` — ne `loadFakture()`
+- [ ] Unutar subscribe: `this.handlePageResult(response)`
+- [ ] API poziv: `this.api.list(this.request)` — ne `list(1, 10)`
+- [ ] `displayedColumns` ima 4 kolone, **bez** `'actions'`
+- [ ] `onNovaFaktura`, `getTipString`, `getTipClass` su ostali
+
+#### Fajl 4: `fakture.component.html`
+
+- [ ] `[dataSource]="items"` — ne `"fakture"`
+- [ ] Nema `table-footer` bloka sa „Stranica 1 od 1"
+- [ ] Nema `{{ fakture.length }}`
+- [ ] Ispod `</table>` postoji `<app-fit-paginator-bar [vm]="this" />`
+- [ ] 4 kolone: brojRacuna, tip, datumKreiranja, brojStavki
+- [ ] Nema kolone actions / edit / delete
+
+#### Test u browseru
+
+- [ ] Otvori `/admin/fakture` — tabela se učita
+- [ ] F12 → Network → klikni `Fakture` request
+- [ ] URL sadrži `Paging.Page=1` i `Paging.PageSize=10` (ili drugi broj ako si mijenjala veličinu)
+- [ ] URL **ne** sadrži `PageNumber`
+- [ ] Paginator ispod tabele prikazuje „Stranica X od Y" i „Ukupno: Z zapisa"
+- [ ] Klik „Sljedeća" učitava drugu stranicu (ako ima dovoljno zapisa)
+
+#### Ako nešto ne radi
+
+| Simptom | Vjerovatni uzrok | Gdje gledaš |
+|---------|------------------|-------------|
+| Crvena greška na `list(1, 10)` | Nisi ažurirala komponentu | Korak 5 |
+| Uvijek ista stranica | Pogrešan query param | Korak 4 — `PageNumber` |
+| Tabela prazna | `[dataSource]="fakture"` umjesto `items` | Korak 6.2 |
+| Nema paginatora | Nisi dodala `app-fit-paginator-bar` | Korak 6.3 |
+| Paginator se ne vidi | `totalItems` je 0 (nema podataka u bazi) | Provjeri Swagger / SSMS |
 
 ---
 
