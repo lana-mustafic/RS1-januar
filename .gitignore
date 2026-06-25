@@ -1,0 +1,25 @@
+# Frontend (not part of this repo push)
+rs1-frontend-2025-26/
+
+# .NET build output
+**/bin/
+**/obj/
+**/.vs/
+
+# Logs
+**/Logs/
+*.log
+
+# User-specific files
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+
+# IDE
+.idea/
+.vscode/
+
+# OS
+Thumbs.db
+.DS_Store
