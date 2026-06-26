@@ -522,6 +522,668 @@ Radiš u **3 fajla**:
 
 **Pravilo:** ne kopiraj `products` HTML 1:1 — tamo su `translate` pipe-ovi. Ti pišeš tekst direktno na bosanskom/hrvatskom.
 
+> **Kako čitati sekciju ispod:** za svaki dio HTML-a i SCSS-a prvo vidiš **OBRAZAC** (kopiraj iz navedenog fajla), pa **TVOJA VERZIJA** (to lijepiš u svoj fajl). Ako piše "bez izmjene" — kopiraj doslovno.
+
+---
+
+## KORAK 3 — OBRAZAC → TVOJA VERZIJA (HTML i SCSS)
+
+Za svaki blok: **gore = obrazac iz projekta**, **dolje = tvoj `dostavljaci` fajl**.
+
+---
+
+### BLOK 1 — Search input (pretraga)
+
+**OBRAZAC iz:** `product-categories-2.component.html` (linija 3)  
+*(jednostavan primjer ngModel + keydown)*
+
+```html
+<input [(ngModel)]="searchValue" (keydown)="inputKeyDown($event)" >
+```
+
+**OBRAZAC iz:** `products.component.html` (linije 12–17)  
+*(isti princip, ali u mat-form-field — bliže tvom dizajnu)*
+
+```html
+<input
+  matInput
+  [placeholder]="'PRODUCTS.SEARCH_INPUT_PLACEHOLDER' | translate"
+  (keyup.enter)="request.paging.page = 1; loadPagedData()"
+  [(ngModel)]="request.search"
+/>
+```
+
+**TVOJ STARTER** (`dostavljaci.component.html`, linija 15) — još nije povezan:
+
+```html
+<input matInput placeholder="Pretraži dostavljače..." />
+```
+
+**➡️ TVOJA VERZIJA** — zamijeni samo `<input>` u svom headeru:
+
+```html
+<input
+  matInput
+  placeholder="Pretraži dostavljače..."
+  [(ngModel)]="searchValue"
+  (keydown)="inputKeyDown($event)"
+/>
+```
+
+**Šta si promijenila:**
+| Obrazac (products) | Tvoja verzija |
+|--------------------|---------------|
+| `[(ngModel)]="request.search"` | `[(ngModel)]="searchValue"` — jer u TS koristiš `searchValue`, a `searchAction` puni `this.request.search` |
+| `(keyup.enter)="request.paging.page = 1; loadPagedData()"` | `(keydown)="inputKeyDown($event)"` — logika je u TS metodi |
+| `translate` pipe | običan tekst `placeholder="Pretraži..."` |
+
+---
+
+### BLOK 2 — Dugme "Novi dostavljač"
+
+**OBRAZAC iz:** `products.component.html` (linije 21–24)
+
+```html
+<button mat-raised-button color="primary" (click)="onCreate()">
+  <mat-icon>add</mat-icon>
+  {{ 'PRODUCTS.NEW_PRODUCT' | translate }}
+</button>
+```
+
+**TVOJ STARTER** (`dostavljaci.component.html`, linije 19–22) — nema `(click)`:
+
+```html
+<button mat-raised-button color="primary">
+  <mat-icon>add</mat-icon>
+  Novi dostavljač
+</button>
+```
+
+**➡️ TVOJA VERZIJA** — dodaj samo `(click)="onCreate()"`:
+
+```html
+<button mat-raised-button color="primary" (click)="onCreate()">
+  <mat-icon>add</mat-icon>
+  Novi dostavljač
+</button>
+```
+
+**Šta si promijenila:** samo `(click)="onCreate()"`. Tekst ostaje tvoj, bez `translate`.
+
+---
+
+### BLOK 3 — Loading (spinner)
+
+**OBRAZAC iz:** `product-categories-2.component.html` (linije 10–13)
+
+```html
+<div *ngIf="isLoading" class="loading-container">
+  <mat-spinner diameter="40"></mat-spinner>
+  <p>{{ 'PRODUCT_CATEGORIES.FORM.LOADING' | translate }}</p>
+</div>
+```
+
+**➡️ TVOJA VERZIJA** — kopiraj strukturu, zamijeni tekst (dodaj POSLIJE `header-card`, PRIJE tabele):
+
+```html
+<div *ngIf="isLoading" class="loading-container">
+  <mat-spinner diameter="40"></mat-spinner>
+  <p>Učitavanje...</p>
+</div>
+```
+
+**Šta si promijenila:** `{{ '...' | translate }}` → `Učitavanje...`
+
+---
+
+### BLOK 4 — Nema podataka (no data)
+
+**OBRAZAC iz:** `product-categories-2.component.html` (linije 5–7)
+
+```html
+<div *ngIf="totalItems ===0">
+  <img src="images/no-data.png"/>
+</div>
+```
+
+**➡️ TVOJA VERZIJA** — prošireno (dodaj POSLIJE loading bloka):
+
+```html
+<div *ngIf="!isLoading && totalItems === 0" class="no-data">
+  <img src="images/no-data.png" alt="Nema podataka" />
+  <p>Nema dostavljača za prikaz.</p>
+</div>
+```
+
+**Šta si promijenila:**
+- dodala `!isLoading &&` — da se ne prikaže dok se učitava
+- dodala klasu `no-data` i paragraf sa porukom
+
+---
+
+### BLOK 5 — Obriši info-card (tvoj starter)
+
+**TVOJ STARTER** (`dostavljaci.component.html`, linije 27–31) — **OBRIŠI CIJELI BLOK:**
+
+```html
+<div class="info-card">
+  <mat-icon>info</mat-icon>
+  <span>Ovdje raditi ispitni zadatak - prvi modul</span>
+</div>
+```
+
+**➡️ TVOJA VERZIJA:** ništa — samo obriši. U finalnom fajlu ovoga nema.
+
+---
+
+### BLOK 6 — Omotač tabele (table + paginator)
+
+**OBRAZAC iz:** `products.component.html` (linije 39–40 i 145–146)
+
+```html
+<div class="mat-elevation-z8" *ngIf="!isLoading && !errorMessage">
+  <table mat-table [dataSource]="items">
+    ...
+  </table>
+
+  <app-fit-paginator-bar [vm]="this" />
+</div>
+```
+
+**➡️ TVOJA VERZIJA:**
+
+```html
+<div class="table-card" *ngIf="!isLoading && totalItems > 0">
+  <table mat-table [dataSource]="items">
+    <!-- kolone — blokovi 7–11 -->
+    <tr mat-header-row *matHeaderRowDef="displayedColumns"></tr>
+    <tr mat-row *matRowDef="let row; columns: displayedColumns"></tr>
+  </table>
+
+  <app-fit-paginator-bar [vm]="this" />
+</div>
+```
+
+**Šta si promijenila:**
+| Obrazac (products) | Tvoja verzija |
+|--------------------|---------------|
+| `class="mat-elevation-z8"` | `class="table-card"` |
+| `*ngIf="!isLoading && !errorMessage"` | `*ngIf="!isLoading && totalItems > 0"` |
+| paginator | **isto** — `<app-fit-paginator-bar [vm]="this" />` |
+
+**Paginator obrazac iz:** `product-categories-2.component.html` (linija 47) — identičan:
+```html
+<app-fit-paginator-bar [vm]="this" />
+```
+
+---
+
+### BLOK 7 — Kolona NAZIV
+
+**OBRAZAC iz:** `products.component.html` (linije 42–47)
+
+```html
+<ng-container matColumnDef="name">
+  <th mat-header-cell *matHeaderCellDef>{{ 'PRODUCTS.TABLE.NAME' | translate }}</th>
+  <td mat-cell *matCellDef="let product">
+    <span style="font-weight: 500">{{ product.name }}</span>
+  </td>
+</ng-container>
+```
+
+**➡️ TVOJA VERZIJA:**
+
+```html
+<ng-container matColumnDef="naziv">
+  <th mat-header-cell *matHeaderCellDef>NAZIV</th>
+  <td mat-cell *matCellDef="let item">
+    <span style="font-weight: 500">{{ item.naziv }}</span>
+  </td>
+</ng-container>
+```
+
+**Šta si promijenila:**
+| products | dostavljaci |
+|----------|-------------|
+| `matColumnDef="name"` | `matColumnDef="naziv"` |
+| `let product` | `let item` |
+| `product.name` | `item.naziv` |
+| translate u headeru | `NAZIV` direktno |
+
+---
+
+### BLOK 8 — Kolona KOD
+
+**OBRAZAC iz:** `products.component.html` (linije 58–64) — kolona `price` (bold span)
+
+```html
+<ng-container matColumnDef="price">
+  <th mat-header-cell *matHeaderCellDef>{{ 'PRODUCTS.TABLE.PRICE' | translate }}</th>
+  <td mat-cell *matCellDef="let product">
+    <span style="font-weight: 600; color: #4976b5"
+      >{{ product.price | number : '1.2-2' }} KM</span
+    >
+  </td>
+</ng-container>
+```
+
+**➡️ TVOJA VERZIJA:**
+
+```html
+<ng-container matColumnDef="kod">
+  <th mat-header-cell *matHeaderCellDef>KOD</th>
+  <td mat-cell *matCellDef="let item">
+    <span style="font-weight: 600">{{ item.kod }}</span>
+  </td>
+</ng-container>
+```
+
+**Šta si promijenila:** ime kolone, polje `kod`, uklonila `color` i `number` pipe (kod nije cijena).
+
+---
+
+### BLOK 9 — Kolona TIP (badge) — NEMA gotovog obrasca u projektu
+
+**OBRAZAC:** nema u `products` ni `product-categories-2` — pišeš iz zadatka.
+
+**➡️ TVOJA VERZIJA** (kopiraj ovo u tabelu):
+
+```html
+<ng-container matColumnDef="tip">
+  <th mat-header-cell *matHeaderCellDef>TIP</th>
+  <td mat-cell *matCellDef="let item">
+    <span class="tip-badge" [ngClass]="getTipClass(item.tip)">
+      {{ getTipLabel(item.tip) }}
+    </span>
+  </td>
+</ng-container>
+```
+
+**Zahtijeva u TS:** `getTipLabel` i `getTipClass` (Korak 3.1) + SCSS `.tip-badge` (Korak 3.2).
+
+---
+
+### BLOK 10 — Kolona AKTIVAN (ikone)
+
+**OBRAZAC iz:** `products.component.html` (linije 81–87)
+
+```html
+<ng-container matColumnDef="isEnabled">
+  <th mat-header-cell *matHeaderCellDef>{{ 'PRODUCTS.TABLE.ACTIVE' | translate }}</th>
+  <td mat-cell *matCellDef="let product">
+    <mat-icon [ngClass]="product.isEnabled ? 'icon-enabled' : 'icon-disabled'">
+      {{ product.isEnabled ? 'check_circle' : 'cancel' }}
+    </mat-icon>
+  </td>
+</ng-container>
+```
+
+**➡️ TVOJA VERZIJA:**
+
+```html
+<ng-container matColumnDef="aktivan">
+  <th mat-header-cell *matHeaderCellDef>AKTIVAN</th>
+  <td mat-cell *matCellDef="let item">
+    <mat-icon [ngClass]="item.aktivan ? 'icon-enabled' : 'icon-disabled'">
+      {{ item.aktivan ? 'check_circle' : 'cancel' }}
+    </mat-icon>
+  </td>
+</ng-container>
+```
+
+**Šta si promijenila:** `isEnabled` → `aktivan`, `product` → `item`. Struktura ikona **ista**.
+
+---
+
+### BLOK 11 — Kolona AKCIJE (edit / delete)
+
+**OBRAZAC iz:** `products.component.html` (linije 91–110)
+
+```html
+<ng-container matColumnDef="actions">
+  <th mat-header-cell *matHeaderCellDef>{{ 'PRODUCTS.TABLE.ACTIONS' | translate }}</th>
+  <td mat-cell *matCellDef="let product">
+    <button
+      mat-icon-button
+      color="primary"
+      (click)="onEdit(product)"
+      [matTooltip]="'PRODUCTS.ACTIONS.EDIT_TOOLTIP' | translate"
+    >
+      <mat-icon>edit</mat-icon>
+    </button>
+    <button
+      mat-icon-button
+      color="warn"
+      (click)="onDelete(product)"
+      [matTooltip]="'PRODUCTS.ACTIONS.DELETE_TOOLTIP' | translate"
+    >
+      <mat-icon>delete</mat-icon>
+    </button>
+  </td>
+</ng-container>
+```
+
+**➡️ TVOJA VERZIJA:**
+
+```html
+<ng-container matColumnDef="actions">
+  <th mat-header-cell *matHeaderCellDef>AKCIJE</th>
+  <td mat-cell *matCellDef="let item">
+    <button mat-icon-button color="primary" (click)="editAction(item)" matTooltip="Uredi">
+      <mat-icon>edit</mat-icon>
+    </button>
+    <button mat-icon-button color="warn" (click)="deleteAction(item)" matTooltip="Obriši">
+      <mat-icon>delete</mat-icon>
+    </button>
+  </td>
+</ng-container>
+```
+
+**Šta si promijenila:**
+| products | dostavljaci |
+|----------|-------------|
+| `onEdit(product)` | `editAction(item)` |
+| `onDelete(product)` | `deleteAction(item)` |
+| `[matTooltip]="'...' \| translate"` | `matTooltip="Uredi"` |
+
+---
+
+### BLOK 12 — Redovi tabele (header + data rows)
+
+**OBRAZAC iz:** `products.component.html` (linije 113–130)
+
+```html
+<tr
+  mat-header-row
+  *matHeaderRowDef="[
+    'name',
+    'categoryName',
+    'price',
+    'stockQuantity',
+    'isEnabled',
+    'actions'
+  ]"
+></tr>
+<tr
+  mat-row
+  *matRowDef="
+    let row;
+    columns: ['name', 'categoryName', 'price', 'stockQuantity', 'isEnabled', 'actions']
+  "
+></tr>
+```
+
+**➡️ TVOJA VERZIJA** — kraće, koristi niz iz TS:
+
+```html
+<tr mat-header-row *matHeaderRowDef="displayedColumns"></tr>
+<tr mat-row *matRowDef="let row; columns: displayedColumns"></tr>
+```
+
+**Zašto kraće:** u `dostavljaci.component.ts` već imaš:
+```ts
+displayedColumns: string[] = ['naziv','kod','tip','aktivan','actions'];
+```
+
+**Napomena:** products ima i `*matNoDataRow` (linije 133–142) — ti to **ne moraš** jer već imaš poseban `no-data` div iznad tabele (Blok 4).
+
+---
+
+### BLOK 13 — SCSS: kartica oko tabele
+
+**OBRAZAC iz:** `products.component.scss` (linije 224–229) — klasa `.mat-elevation-z8`
+
+```scss
+.mat-elevation-z8 {
+  background: white;
+  border-radius: 16px;
+  overflow: hidden;
+  box-shadow: 0 2px 8px rgba(73, 118, 181, 0.08), 0 1px 3px rgba(0, 0, 0, 0.06);
+  border: 1px solid $border-color;
+```
+
+**➡️ TVOJA VERZIJA** — dodaj na **kraj** `dostavljaci.component.scss` (koristiš klasu `table-card` iz HTML-a):
+
+```scss
+.table-card {
+  background: white;
+  border-radius: 16px;
+  overflow: hidden;
+  box-shadow: 0 2px 8px rgba(73, 118, 181, 0.08);
+  border: 1px solid rgba(73, 118, 181, 0.15);
+}
+```
+
+**Šta si promijenila:** ime klase `.mat-elevation-z8` → `.table-card`, malo jednostavniji `border` (bez SCSS varijable `$border-color` — radi i ovako).
+
+---
+
+### BLOK 14 — SCSS: ikone aktivan (zelena / crvena)
+
+**OBRAZAC iz:** `products.component.scss` (linije 252–264) — unutar `td { }`
+
+```scss
+.icon-enabled {
+  color: $success-color;
+  font-size: 24px;
+  width: 24px;
+  height: 24px;
+}
+
+.icon-disabled {
+  color: $text-disabled;
+  font-size: 24px;
+  width: 24px;
+  height: 24px;
+}
+```
+
+**➡️ TVOJA VERZIJA** — dodaj na kraj `dostavljaci.component.scss` (kraća verzija, iste boje):
+
+```scss
+.icon-enabled { color: #66bb6a; }
+.icon-disabled { color: #ef5350; }
+```
+
+**Šta si promijenila:** direktne boje umjesto `$success-color` / `$text-disabled` — jednostavnije jer tvoj SCSS fajl već ima svoje varijable, ali nema `$success-color`.
+
+---
+
+### BLOK 15 — SCSS: badge za tip — NEMA obrasca u projektu
+
+**OBRAZAC:** nema u repo-u — iz zadatka.
+
+**➡️ TVOJA VERZIJA** — dodaj na kraj `dostavljaci.component.scss`:
+
+```scss
+.tip-badge {
+  display: inline-block;
+  padding: 6px 14px;
+  border-radius: 20px;
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+
+  &.ekstern {
+    background-color: #e3f2fd;
+    color: #1565c0;
+  }
+
+  &.intern {
+    background-color: #e8f5e9;
+    color: #2e7d32;
+  }
+
+  &.freelancer {
+    background-color: #fff3e0;
+    color: #e65100;
+  }
+}
+```
+
+**Kopiraj doslovno** — povezuje se sa `getTipClass()` koji vraća `ekstern`, `intern`, `freelancer`.
+
+---
+
+### BLOK 16 — Cijeli HTML fajl (sve blokovi spojeni)
+
+**Tvoj starter** (`dostavljaci.component.html`) — samo header + info-card.
+
+**➡️ TVOJA VERZIJA** — zamijeni **cijeli sadržaj** fajla ovim (sve blokovi 1–12 spojeni):
+
+```html
+<div class="container">
+  <div class="header-card">
+    <div class="header-card-content">
+      <div class="title-section">
+        <div class="title-icon">
+          <mat-icon>local_shipping</mat-icon>
+        </div>
+        <h1>Dostavljači</h1>
+      </div>
+
+      <div class="actions-container">
+        <mat-form-field class="search-field" appearance="outline">
+          <mat-label>Pretraga...</mat-label>
+          <input
+            matInput
+            placeholder="Pretraži dostavljače..."
+            [(ngModel)]="searchValue"
+            (keydown)="inputKeyDown($event)"
+          />
+          <mat-icon matSuffix>search</mat-icon>
+        </mat-form-field>
+
+        <button mat-raised-button color="primary" (click)="onCreate()">
+          <mat-icon>add</mat-icon>
+          Novi dostavljač
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <div *ngIf="isLoading" class="loading-container">
+    <mat-spinner diameter="40"></mat-spinner>
+    <p>Učitavanje...</p>
+  </div>
+
+  <div *ngIf="!isLoading && totalItems === 0" class="no-data">
+    <img src="images/no-data.png" alt="Nema podataka" />
+    <p>Nema dostavljača za prikaz.</p>
+  </div>
+
+  <div class="table-card" *ngIf="!isLoading && totalItems > 0">
+    <table mat-table [dataSource]="items">
+      <ng-container matColumnDef="naziv">
+        <th mat-header-cell *matHeaderCellDef>NAZIV</th>
+        <td mat-cell *matCellDef="let item">
+          <span style="font-weight: 500">{{ item.naziv }}</span>
+        </td>
+      </ng-container>
+
+      <ng-container matColumnDef="kod">
+        <th mat-header-cell *matHeaderCellDef>KOD</th>
+        <td mat-cell *matCellDef="let item">
+          <span style="font-weight: 600">{{ item.kod }}</span>
+        </td>
+      </ng-container>
+
+      <ng-container matColumnDef="tip">
+        <th mat-header-cell *matHeaderCellDef>TIP</th>
+        <td mat-cell *matCellDef="let item">
+          <span class="tip-badge" [ngClass]="getTipClass(item.tip)">
+            {{ getTipLabel(item.tip) }}
+          </span>
+        </td>
+      </ng-container>
+
+      <ng-container matColumnDef="aktivan">
+        <th mat-header-cell *matHeaderCellDef>AKTIVAN</th>
+        <td mat-cell *matCellDef="let item">
+          <mat-icon [ngClass]="item.aktivan ? 'icon-enabled' : 'icon-disabled'">
+            {{ item.aktivan ? 'check_circle' : 'cancel' }}
+          </mat-icon>
+        </td>
+      </ng-container>
+
+      <ng-container matColumnDef="actions">
+        <th mat-header-cell *matHeaderCellDef>AKCIJE</th>
+        <td mat-cell *matCellDef="let item">
+          <button mat-icon-button color="primary" (click)="editAction(item)" matTooltip="Uredi">
+            <mat-icon>edit</mat-icon>
+          </button>
+          <button mat-icon-button color="warn" (click)="deleteAction(item)" matTooltip="Obriši">
+            <mat-icon>delete</mat-icon>
+          </button>
+        </td>
+      </ng-container>
+
+      <tr mat-header-row *matHeaderRowDef="displayedColumns"></tr>
+      <tr mat-row *matRowDef="let row; columns: displayedColumns"></tr>
+    </table>
+
+    <app-fit-paginator-bar [vm]="this" />
+  </div>
+</div>
+```
+
+**Header** (`title-section`, `title-icon`) — **ostaje iz tvog startera**, samo si dodala bindinge na input i dugme.
+
+---
+
+### BLOK 17 — Cijeli SCSS dopuna (sve blokovi 13–15 spojeni)
+
+**Tvoj fajl** `dostavljaci.component.scss` — već ima `.container`, `.header-card`, itd. **Ne briši to.**
+
+**➡️ TVOJA VERZIJA** — na **kraj fajla** (poslije `@media` bloka) **zalijepi**:
+
+```scss
+.table-card {
+  background: white;
+  border-radius: 16px;
+  overflow: hidden;
+  box-shadow: 0 2px 8px rgba(73, 118, 181, 0.08);
+  border: 1px solid rgba(73, 118, 181, 0.15);
+}
+
+.tip-badge {
+  display: inline-block;
+  padding: 6px 14px;
+  border-radius: 20px;
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+
+  &.ekstern {
+    background-color: #e3f2fd;
+    color: #1565c0;
+  }
+
+  &.intern {
+    background-color: #e8f5e9;
+    color: #2e7d32;
+  }
+
+  &.freelancer {
+    background-color: #fff3e0;
+    color: #e65100;
+  }
+}
+
+.icon-enabled { color: #66bb6a; }
+.icon-disabled { color: #ef5350; }
+```
+
+---
+
+## Redoslijed copy-paste (ako ne znaš odakle krenuti)
+
+1. TS helper metode (sekcija 3.1 ispod)
+2. SCSS — Blok 17 na kraj fajla
+3. HTML — ili blok po blok (1→12), ili cijeli Blok 16 odjednom
+4. Obriši info-card (Blok 5)
+5. Pokreni app → `/admin/dostavljaci`
+
 ---
 
 ## KORAK 3.1 — TS: helper metode za badge
