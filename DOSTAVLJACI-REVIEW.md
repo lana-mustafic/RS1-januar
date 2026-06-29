@@ -87,6 +87,224 @@ Implementacija je **solidno započeta** i pokriva većinu zahtjeva (CQRS struktu
 
 ---
 
+## Referentni kod — šta je dobro urađeno
+
+### Backend: Entitet i enum
+
+`Market.Domain/Entities/Dostavljaci/DostavljacEntity.cs`
+
+```csharp
+public class DostavljacEntity : BaseEntity
+{
+    public required string Naziv { get; set; }
+    public required DostavljacTip Tip { get; set; }
+    public required string Kod { get; set; }
+    public bool Aktivan { get; set; }
+
+    public static class Constraints
+    {
+        public const int NazivMaxLength = 100;
+        public const int KodMaxLength = 3;
+    }
+}
+```
+
+`Market.Domain/Entities/Dostavljaci/DostavljacTip.cs`
+
+```csharp
+public enum DostavljacTip
+{
+    Ekstern = 1,
+    Intern = 2,
+    Freelancer = 3
+}
+```
+
+### Backend: Controller (CQRS)
+
+`Market.API/Controllers/DostavljaciController.cs`
+
+```csharp
+[ApiController]
+[Route("[controller]")]
+[Authorize(Policy = "AdminOnly")]
+public class DostavljaciController(ISender sender) : ControllerBase
+{
+    [HttpPost]
+    public async Task<ActionResult<int>> Create(CreateDostavljacCommand command, CancellationToken ct)
+    {
+        int id = await sender.Send(command, ct);
+        return CreatedAtAction(nameof(GetById), new { id }, new { id });
+    }
+
+    [HttpPut("{id:int}")]
+    public async Task Update(int id, UpdateDostavljacCommand command, CancellationToken ct)
+    {
+        command.Id = id;
+        await sender.Send(command, ct);
+    }
+
+    [HttpDelete("{id:int}")]
+    public async Task Delete(int id, CancellationToken ct)
+    {
+        await sender.Send(new DeleteDostavljacCommand { Id = id }, ct);
+    }
+
+    [HttpGet("{id:int}")]
+    [AllowAnonymous]
+    public async Task<GetDostavljacByIdQueryDto> GetById(int id, CancellationToken ct)
+    {
+        return await sender.Send(new GetDostavljacByIdQuery { Id = id }, ct);
+    }
+
+    [HttpGet]
+    [AllowAnonymous]
+    public async Task<PageResult<ListDostavljacQueryDto>> List(
+        [FromQuery] ListDostavljacQuery query, CancellationToken ct)
+    {
+        return await sender.Send(query, ct);
+    }
+}
+```
+
+### Backend: Create handler (radi ispravno)
+
+`CreateDostavljacCommandHandler.cs`
+
+```csharp
+public async Task<int> Handle(CreateDostavljacCommand request, CancellationToken cancellationToken)
+{
+    var naziv = request.Naziv?.Trim();
+    var kod = request.Kod?.Trim();
+
+    if (string.IsNullOrWhiteSpace(naziv))
+        throw new ValidationException("Naziv je obavezno polje.");
+
+    if (string.IsNullOrWhiteSpace(kod))
+        throw new ValidationException("Kod je obavezno polje.");
+
+    bool exists = await context.Dostavljaci
+        .AnyAsync(x => x.Kod.ToLower() == kod.ToLower(), cancellationToken);
+
+    if (exists)
+        throw new MarketConflictException("Kod vec postoji.");
+
+    var dto = new DostavljacEntity
+    {
+        Naziv = naziv,
+        Kod = kod,
+        Tip = request.Tip,
+        Aktivan = request.Aktivan
+    };
+
+    context.Dostavljaci.Add(dto);
+    await context.SaveChangesAsync(cancellationToken);
+    return dto.Id;
+}
+```
+
+### Frontend: Pretraga na Enter (radi ispravno)
+
+`dostavljaci.component.ts`
+
+```typescript
+searchAction(): void {
+  this.request.search = this.searchValue?.trim() || null;
+  this.request.paging.page = 1;
+  this.loadPagedData();
+}
+
+inputKeyDown(event: KeyboardEvent) {
+  if (event.key === 'Enter') {
+    this.searchAction();
+  }
+}
+```
+
+### Frontend: Brisanje s modalom (radi ispravno)
+
+`dostavljaci.component.ts`
+
+```typescript
+deleteAction(item: ListDostavljacQueryDto) {
+  this.dialogHelper.confirmDelete(item.naziv).subscribe((result) => {
+    if (result && result.button === DialogButton.DELETE) {
+      this.performDelete(item);
+    }
+  });
+}
+
+private performDelete(item: ListDostavljacQueryDto): void {
+  this.startLoading();
+
+  this.api.delete(item.id).subscribe({
+    next: () => {
+      this.toaster.success(`Dostavljac "${item.naziv}" je uspjesno obrisan.`);
+      this.loadPagedData();
+    },
+    error: (err) => {
+      this.stopLoading();
+      this.toaster.error(err?.message ?? 'Greska pri brisanju dostavljaca');
+    }
+  });
+}
+```
+
+### Frontend: Add forma — reactive form (uglavnom OK)
+
+`dostavljaci-add.component.ts`
+
+```typescript
+ngOnInit(): void {
+  this.initForm(false);
+  this.form = this.fb.group({
+    naziv: ['', [Validators.required]],
+    tip: [null, [Validators.required]],
+    kod: ['', [Validators.required, Validators.maxLength(3)]],
+    aktivan: [true]
+  });
+}
+
+protected save(): void {
+  if (this.form.invalid || this.isLoading) return;
+
+  this.startLoading();
+  const command: CreateDostavljacCommand = {
+    naziv: this.form.value.naziv?.trim(),
+    kod: this.form.value.kod?.trim(),
+    tip: this.form.value.tip,
+    aktivan: this.form.value.aktivan ?? true
+  };
+
+  this.api.create(command).subscribe({
+    next: () => {
+      this.stopLoading();
+      this.toaster.success('Dostavljac dodan uspjesno.');
+      this.router.navigate(['/admin/dostavljaci']);
+    },
+    error: (err) => {
+      this.toaster.error(err?.message ?? 'Greska pri dodavanju novog dostavljaca');
+    }
+  });
+}
+```
+
+`dostavljaci-add.component.html` — Save disabled:
+
+```html
+<button
+  type="submit"
+  mat-raised-button
+  color="primary"
+  [disabled]="form.invalid || isLoading"
+>
+  <mat-icon>save</mat-icon>
+  Sačuvaj
+</button>
+```
+
+---
+
 ## Kritične greške (prioritet: visok)
 
 Ove stvari treba popraviti prije ispita — vjerovatno direktno utiču na bodovanje.
@@ -95,11 +313,54 @@ Ove stvari treba popraviti prije ispita — vjerovatno direktno utiču na bodova
 
 **Lokacija:** `Market.Application/Modules/Catalog/Dostavljaci/Commands/Update/UpdateDostavljacCommandHandler.cs`
 
-Handler je prazna `internal` klasa koja **ne implementira** `IRequestHandler<UpdateDostavljacCommand, Unit>`. Validator i controller postoje, ali nema logike za ažuriranje entiteta u bazi.
+**Trenutni kod (ne radi):**
 
-**Posljedica:** PUT `/Dostavljaci/{id}` neće raditi (runtime greška — nema registriranog handlera).
+```csharp
+namespace Market.Application.Modules.Catalog.Dostavljaci.Commands.Update
+{
+    internal class UpdateDostavljacCommandHandler
+    {
+    }
+}
+```
 
-**Šta treba:** Implementirati handler po uzoru na `UpdateProductCommandHandler` — učitaj entitet, provjeri postojanje, provjeri jedinstvenost koda (osim trenutnog ID-a), ažuriraj polja, `SaveChangesAsync`.
+**Posljedica:** PUT `/Dostavljaci/{id}` neće raditi — nema registriranog `IRequestHandler`.
+
+**Predloženi ispravak:**
+
+```csharp
+namespace Market.Application.Modules.Catalog.Dostavljaci.Commands.Update;
+
+public sealed class UpdateDostavljacCommandHandler(IAppDbContext context)
+    : IRequestHandler<UpdateDostavljacCommand, Unit>
+{
+    public async Task<Unit> Handle(UpdateDostavljacCommand request, CancellationToken ct)
+    {
+        var entity = await context.Dostavljaci
+            .FirstOrDefaultAsync(x => x.Id == request.Id, ct);
+
+        if (entity is null)
+            throw new MarketNotFoundException("Dostavljac nije pronađen.");
+
+        var naziv = request.Naziv?.Trim();
+        var kod = request.Kod?.Trim();
+
+        bool kodExists = await context.Dostavljaci
+            .AnyAsync(x => x.Id != request.Id && x.Kod.ToLower() == kod!.ToLower(), ct);
+
+        if (kodExists)
+            throw new MarketConflictException("Kod vec postoji.");
+
+        entity.Naziv = naziv!;
+        entity.Kod = kod!;
+        entity.Tip = request.Tip;
+        entity.Aktivan = request.Aktivan;
+
+        await context.SaveChangesAsync(ct);
+        return Unit.Value;
+    }
+}
+```
 
 ---
 
@@ -107,28 +368,83 @@ Handler je prazna `internal` klasa koja **ne implementira** `IRequestHandler<Upd
 
 **Lokacija:** `admin-routing-module.ts` + `dostavljaci.component.ts`
 
-| Šta je sada | Šta bi trebalo (kao kod Products) |
-|---|---|
-| Ruta: `dostavljaci/edit` (bez `:id`) | `dostavljaci/:id/edit` ili `dostavljaci/edit/:id` |
-| Navigacija: `['edit', item.id]` → `/admin/dostavljaci/edit/5` | `['/admin/dostavljaci', item.id, 'edit']` |
+**Trenutni kod — ruta (pogrešno):**
 
-Edit komponenta čita `this.route.snapshot.params['id']`, ali ruta **nema parametar `id`**.
+```typescript
+{
+  path: 'dostavljaci/edit',   // nema :id
+  component: DostavljaciEditComponent,
+},
+```
 
-**Posljedica:** Klik na "Uredi" ne otvara ispravnu stranicu / ID je `NaN` → redirect ili greška.
+**Trenutni kod — navigacija (pogrešno):**
+
+```typescript
+editAction(item: ListDostavljacQueryDto): void {
+  this.router.navigate(['edit', item.id], { relativeTo: this.route });
+  // pokušava ići na /admin/dostavljaci/edit/5 — ruta ne postoji!
+}
+```
+
+**Usporedba s Products (ispravno):**
+
+```typescript
+// admin-routing-module.ts
+{ path: 'products/:id/edit', component: ProductsEditComponent }
+
+// products.component.ts
+onEdit(product: ListProductsQueryDto): void {
+  this.router.navigate(['/admin/products', product.id, 'edit']);
+}
+```
+
+**Predloženi ispravak:**
+
+```typescript
+// admin-routing-module.ts
+{
+  path: 'dostavljaci/:id/edit',
+  component: DostavljaciEditComponent,
+},
+
+// dostavljaci.component.ts
+editAction(item: ListDostavljacQueryDto): void {
+  this.router.navigate(['/admin/dostavljaci', item.id, 'edit']);
+}
+```
+
+Edit komponenta već čita ID ispravno — samo ruta i navigacija trebaju popravku:
+
+```typescript
+// dostavljaci-edit.component.ts
+this.dostavljacId = +this.route.snapshot.params['id'];
+```
 
 ---
 
 ### 3. Backend pretraga nije case-insensitive
 
-**Lokacija:** `ListDostavljacQueryHandler.cs`, linija ~14
+**Lokacija:** `ListDostavljacQueryHandler.cs`
+
+**Trenutni kod (pogrešno):**
 
 ```csharp
-q = q.Where(x => x.Naziv.ToLower().Contains(s));
+if (!string.IsNullOrWhiteSpace(request.Search))
+{
+    var s = request.Search.Trim();
+    q = q.Where(x => x.Naziv.ToLower().Contains(s));  // s nije lowercase!
+}
 ```
 
-`Naziv` se pretvara u lowercase, ali **`s` (search string) nije**. Ispit eksplicitno traži pretragu **bez obzira na velika/mala slova**.
+**Predloženi ispravak:**
 
-**Ispravak:** `s.ToLower()` ili `EF.Functions.Like` / `Contains` s `StringComparison`.
+```csharp
+if (!string.IsNullOrWhiteSpace(request.Search))
+{
+    var s = request.Search.Trim().ToLower();
+    q = q.Where(x => x.Naziv.ToLower().Contains(s));
+}
+```
 
 ---
 
@@ -138,51 +454,150 @@ q = q.Where(x => x.Naziv.ToLower().Contains(s));
 
 **Lokacija:** `dostavljaci.component.html`
 
+**Trenutni kod (pogrešno):**
+
 ```html
-{{ getTipClass(item.tip) }}
+<span class="tip-badge" [ngClass]="getTipClass(item.tip)">
+  {{ getTipClass(item.tip) }}
+</span>
 ```
 
-Prikazuje se `ekstern`, `intern`, `freelancer` umjesto `Ekstern`, `Intern`, `Freelancer`. Metoda `getTipLabel()` postoji u TS-u, ali se **ne koristi u HTML-u**.
+Prikazuje `ekstern`, `intern`, `freelancer` umjesto `Ekstern`, `Intern`, `Freelancer`.
+
+**Predloženi ispravak:**
+
+```html
+<span class="tip-badge" [ngClass]="getTipClass(item.tip)">
+  {{ getTipLabel(item.tip) }}
+</span>
+```
+
+Metoda `getTipLabel()` već postoji u `dostavljaci.component.ts`:
+
+```typescript
+getTipLabel(tip: DostavljacTip): string {
+  switch (tip) {
+    case DostavljacTip.Ekstern: return 'Ekstern';
+    case DostavljacTip.Intern: return 'Intern';
+    case DostavljacTip.Freelancer: return 'Freelancer';
+  }
+}
+```
 
 ---
 
 ### 5. Nedostaju stilovi za `tip-badge`
 
-**Lokacija:** `dostavljaci.component.scss` (prazan za badge)
+**Lokacija:** `dostavljaci.component.scss` — nema `.tip-badge` stilova.
 
-U `fakture.component.scss` postoji `.tip-badge` sa bojama, ali u dostavljačima **nema** odgovarajućih stilova za `.ekstern`, `.intern`, `.freelancer`. Badge-ovi neće izgledati kao na šablonu ispita.
+**Predloženi ispravak** — dodaj u `dostavljaci.component.scss`:
+
+```scss
+.tip-badge {
+  display: inline-block;
+  padding: 6px 14px;
+  border-radius: 20px;
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+
+  &.ekstern {
+    background-color: #fff3e0;
+    color: #e65100;
+  }
+
+  &.intern {
+    background-color: #e8f5e9;
+    color: #2e7d32;
+  }
+
+  &.freelancer {
+    background-color: #e3f2fd;
+    color: #1565c0;
+  }
+}
+```
+
+**Uzor:** `fakture.component.scss` ima sličan `.tip-badge` blok.
 
 ---
 
 ### 6. Greška pri učitavanju liste prikazuje `success` toast
 
-**Lokacija:** `dostavljaci.component.ts`, error callback u `loadPagedData()`
+**Lokacija:** `dostavljaci.component.ts`
+
+**Trenutni kod (pogrešno):**
 
 ```typescript
-this.toaster.success(err?.message ?? 'Greska pri ucitavanju dostavljaca');
+error: (err) => {
+  this.stopLoading();
+  this.toaster.success(err?.message ?? 'Greska pri ucitavanju dostavljaca');
+  console.error('Load dostavljaci error:', err);
+}
 ```
 
-Za grešku treba `toaster.error(...)`, ne `success`.
+**Predloženi ispravak:**
+
+```typescript
+error: (err) => {
+  this.stopLoading();
+  this.toaster.error(err?.message ?? 'Greska pri ucitavanju dostavljaca');
+  console.error('Load dostavljaci error:', err);
+}
+```
 
 ---
 
 ### 7. Bug u poruci validacije za Kod (Add komponenta)
 
-**Lokacija:** `dostavljaci-add.component.ts` → `getErrorMessage()`
+**Lokacija:** `dostavljaci-add.component.ts`
+
+**Trenutni kod (pogrešno):**
 
 ```typescript
-if (control.errors['maxLength']) return 'Broj karaktera neispravan.';
+getErrorMessage(controlName: string): string {
+  const control = this.form.get(controlName);
+  if (!control || !control.errors) return '';
+
+  if (control.errors['required']) return 'Polje je obavezno.';
+  if (control.errors['maxLength']) return 'Broj karaktera neispravan.';  // pogrešan ključ!
+  return 'Neispravna vrijednost.';
+}
 ```
 
-Angular validator vraća ključ **`maxlength`** (malo slovo), ne `maxLength`. U Edit komponenti je ispravno (`maxlength`), u Add nije — poruka se neće prikazati.
+Angular validator vraća ključ **`maxlength`** (malo slovo), ne `maxLength`.
+
+**Predloženi ispravak:**
+
+```typescript
+if (control.errors['maxlength']) return 'Kod može imati najviše 3 karaktera.';
+```
 
 ---
 
 ### 8. `stopLoading()` se ne poziva nakon greške pri kreiranju
 
-**Lokacija:** `dostavljaci-add.component.ts`, error callback u `save()`
+**Lokacija:** `dostavljaci-add.component.ts`
 
-Na uspjeh se poziva `stopLoading()`, na grešku ne — forma može ostati u loading stanju sa disabled dugmetom.
+**Trenutni kod (pogrešno):**
+
+```typescript
+error: (err) => {
+  this.toaster.error(err?.message ?? 'Greska pri dodavanju novog dostavljaca');
+  console.error('Create dostavljac error:', err);
+  // nedostaje stopLoading()!
+}
+```
+
+**Predloženi ispravak:**
+
+```typescript
+error: (err) => {
+  this.stopLoading(err?.message ?? 'Greska pri dodavanju novog dostavljaca');
+  this.toaster.error(err?.message ?? 'Greska pri dodavanju novog dostavljaca');
+  console.error('Create dostavljac error:', err);
+}
+```
 
 ---
 
@@ -190,37 +605,90 @@ Na uspjeh se poziva `stopLoading()`, na grešku ne — forma može ostati u load
 
 Ispit traži: *"maksimalno 3 alfanumerička karaktera"*.
 
-Trenutno:
-- **Frontend:** samo `Validators.required` + `Validators.maxLength(3)`
-- **Backend:** samo `NotEmpty` + `MaximumLength(3)`
+**Trenutni kod — Frontend:**
 
-Nema provjere da su samo slova/brojevi (npr. regex `^[a-zA-Z0-9]{1,3}$`).
+```typescript
+kod: ['', [Validators.required, Validators.maxLength(3)]],
+```
+
+**Trenutni kod — Backend validator:**
+
+```csharp
+RuleFor(x => x.Kod)
+    .NotEmpty().WithMessage("Kod je obavezno polje.")
+    .MaximumLength(DostavljacEntity.Constraints.KodMaxLength);
+```
+
+**Predloženi ispravak — Frontend:**
+
+```typescript
+import { Validators, FormBuilder, AbstractControl, ValidationErrors } from '@angular/forms';
+
+function alphanumericValidator(control: AbstractControl): ValidationErrors | null {
+  const value = control.value?.trim();
+  if (!value) return null;
+  return /^[a-zA-Z0-9]{1,3}$/.test(value) ? null : { alphanumeric: true };
+}
+
+// u formi:
+kod: ['', [Validators.required, Validators.maxLength(3), alphanumericValidator]],
+```
+
+**Predloženi ispravak — Backend:**
+
+```csharp
+RuleFor(x => x.Kod)
+    .NotEmpty()
+    .MaximumLength(DostavljacEntity.Constraints.KodMaxLength)
+    .Matches("^[a-zA-Z0-9]{1,3}$").WithMessage("Kod mora biti alfanumerički (max 3 karaktera).");
+```
 
 ---
 
 ### 10. Update nema provjeru jedinstvenosti Koda
 
-Create handler provjerava duplikat koda, ali Update handler (kada se implementira) mora imati istu logiku — dozvoliti isti kod za isti ID, odbiti ako drugi zapis već koristi taj kod.
+Create handler to radi:
+
+```csharp
+bool exists = await context.Dostavljaci
+    .AnyAsync(x => x.Kod.ToLower() == kod.ToLower(), cancellationToken);
+```
+
+Update handler (kad se implementira) mora imati:
+
+```csharp
+bool kodExists = await context.Dostavljaci
+    .AnyAsync(x => x.Id != request.Id && x.Kod.ToLower() == kod!.ToLower(), ct);
+```
 
 ---
 
 ## Manje greške / kozmetika (prioritet: nizak)
 
-| # | Problem | Lokacija |
-|---|---|---|
-| 11 | Starter komponenta `catalog/dostavljaci/dostavljac-edit` još u `app-module.ts` — prazna, nije u rutama | `app-module.ts` |
-| 12 | Nekorišteni importi u Add komponenti (`ProductsApiService`, `CreateProductCommand`, `largePaging`...) | `dostavljaci-add.component.ts` |
-| 13 | Enum label "Intern" umjesto "Interni" (ispit koristi "Interni") | FE + BE enum |
-| 14 | `mat-checkbox` umjesto toggle switcha (ispit pokazuje switch) | Add/Edit HTML |
-| 15 | Dugme "Odustani" umjesto "OTKAŽI" | Add/Edit HTML |
-| 16 | Naslov "Novi dostavljač" umjesto "Dodaj dostavljača" | Add HTML |
-| 17 | `dostavljaci-add.component.scss` je prazan fajl | — |
-| 18 | Hardkodiran error kod `"123"` u Delete handleru | `DeleteDostavljacCommandHandler.cs` |
-| 19 | Nekonzistentno pisanje (Greska/Greška, uspjesno/uspješno) | više fajlova |
+| # | Problem | Lokacija | Kod / napomena |
+|---|---|---|---|
+| 11 | Starter komponenta još u `app-module.ts` | `app-module.ts` | `DostavljacEditComponent` iz `catalog/dostavljaci/` — prazna, nije u rutama |
+| 12 | Nekorišteni importi u Add | `dostavljaci-add.component.ts` | `ProductsApiService`, `CreateProductCommand`, `largePaging`... |
+| 13 | "Intern" umjesto "Interni" | FE + BE enum | `label: 'Intern'` → `label: 'Interni'` |
+| 14 | Checkbox umjesto toggle | Add/Edit HTML | `<mat-checkbox>` → `<mat-slide-toggle>` |
+| 15 | "Odustani" umjesto "OTKAŽI" | Add/Edit HTML | Tekst na dugmetu |
+| 16 | Naslov "Novi dostavljač" | Add HTML | Ispit: "Dodaj dostavljača" |
+| 17 | Prazan SCSS | `dostavljaci-add.component.scss` | Kopiraj iz `products-add.component.scss` |
+| 18 | Hardkodiran error kod | `DeleteDostavljacCommandHandler.cs` | `throw new MarketBusinessRuleException("123", ...)` |
+| 19 | Nekonzistentno pisanje | više fajlova | Greska/Greška, uspjesno/uspješno |
+
+**Nekorišteni importi u Add (obriši):**
+
+```typescript
+import {CreateProductCommand, GetProductByIdQueryDto} from '../../../../../api-services/products/products-api.models';
+import {ProductsApiService} from '../../../../../api-services/products/products-api.service';
+import {ListDostavljacQueryDto} from '../../../../../api-services/dostavljaci/dostavljac-api.model';
+import {largePaging} from '../../../../../core/models/paging/paging-utils';
+```
 
 ---
 
-## Šta je dobro urađeno
+## Šta je dobro urađeno (sažetak)
 
 - **CQRS struktura** — odvojeni Commands/Queries, validatori, controller sa MediatR
 - **Entitet i enum** — `DostavljacEntity`, `DostavljacTip` (Ekstern, Intern, Freelancer)
@@ -231,20 +699,20 @@ Create handler provjerava duplikat koda, ali Update handler (kada se implementir
 - **Brisanje** — `dialogHelper`, refresh liste, success/error toast
 - **Sidebar link** — "Dostavljači" u navigaciji
 - **Create handler** — provjera jedinstvenog koda prije inserta
-- **Base klase** — konzistentno korištenje `BaseListPagedComponent` i `BaseFormComponent`
+- **Base klase** — `BaseListPagedComponent` i `BaseFormComponent`
 
 ---
 
 ## Moguća unapređenja (nije obavezno za ispit, ali plus)
 
-1. **Uskladiti rute s Products modulom** — `products/:id/edit` pattern kroz cijeli projekat
-2. **Dodati `dostavljac` sekciju u `dialogHelper`** — kao `product` i `productCategory` (konzistentnost)
-3. **Kopirati `.tip-badge` stilove** iz `fakture.component.scss` i prilagoditi boje za Ekstern/Intern/Freelancer
-4. **Koristiti `mat-slide-toggle`** umjesto checkboxa za "Aktivan" (bliže šablonu)
-5. **Ukloniti starter komponentu** iz `app-module.ts` i `catalog/dostavljaci/` foldera
+1. **Uskladiti rute s Products modulom** — `products/:id/edit` pattern
+2. **Dodati `dostavljac` sekciju u `dialogHelper`** — kao `product` i `productCategory`
+3. **Kopirati `.tip-badge` stilove** iz `fakture.component.scss`
+4. **Koristiti `mat-slide-toggle`** umjesto checkboxa za "Aktivan"
+5. **Ukloniti starter komponentu** iz `app-module.ts`
 6. **Očistiti nekorištene importe** u Add komponenti
-7. **Dodati seed podatke** za dostavljače (olakšava demonstraciju na ispitu)
-8. **Testirati auth flow** — Delete zahtijeva autentifikaciju u handleru; provjeriti da login radi prije demo brisanja
+7. **Dodati seed podatke** za dostavljače
+8. **Testirati auth flow** — Delete zahtijeva autentifikaciju u handleru
 
 ---
 
